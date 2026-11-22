@@ -331,24 +331,43 @@ pub fn unstripify(
     comptime checkIndex(Index);
     assert(indices.len == 0 or destination.ptr != indices.ptr);
 
+    // Without restart indices the loop has no restart test; the original's
+    // compiler unswitches its loop the same way.
+    if (restart_index == 0) return unstripifyRun(Index, destination, indices, null);
+    return unstripifyRun(Index, destination, indices, restart_index);
+}
+
+inline fn unstripifyRun(
+    comptime Index: type,
+    destination: []Index,
+    indices: []const Index,
+    restart: ?Index,
+) usize {
     var offset: usize = 0;
     var start: usize = 0;
 
     for (indices, 0..) |index, i| {
-        if (restart_index != 0 and index == restart_index) {
+        if (restart != null and index == restart.?) {
             start = i + 1;
         } else if (i - start >= 2) {
-            var a = indices[i - 2];
-            var b = indices[i - 1];
-            const c = indices[i];
+            // Each corner in its own scalar, and the swap as selects: as an
+            // array or a swap through memory, LLVM packs them into one vector
+            // register and shuffles bytes for the swap, which is slower.
+            const p = indices[i - 2];
+            const q = indices[i - 1];
+            const c = index;
 
             // Odd triangles have the opposite winding.
-            if ((i - start) & 1 != 0) std.mem.swap(Index, &a, &b);
+            const odd = (i - start) & 1 != 0;
+            const a = if (odd) q else p;
+            const b = if (odd) p else q;
 
             // Swaps in the strip make degenerate triangles, restart indices
             // or not; leave them out.
-            if (a != b and a != c and b != c) {
-                destination[offset..][0..3].* = .{ a, b, c };
+            if (p != q and a != c and b != c) {
+                destination[offset] = a;
+                destination[offset + 1] = b;
+                destination[offset + 2] = c;
                 offset += 3;
             }
         }

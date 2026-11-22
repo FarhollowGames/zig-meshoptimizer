@@ -1690,6 +1690,13 @@ fn decodeVertexBlockSimd(
 
     const vertex_count_aligned = std.mem.alignForward(usize, vertex_count, byte_group_size);
 
+    // The deltas are written for whole groups of vertices. When the block
+    // has no part group, as all but the last do, they go straight to
+    // `vertex_data`, which the original fills by copying the block after
+    // decoding it; only after an error, when the output is unspecified,
+    // does that leave other bytes there.
+    const direct = vertex_count == vertex_count_aligned;
+
     const control_size = if (version == .v0) 0 else vertex_size / 4;
     if (data.len - start < control_size) return null;
 
@@ -1728,7 +1735,7 @@ fn decodeVertexBlockSimd(
         }
 
         const channel = if (version == .v0) 0 else channels[k / 4];
-        const target = transposed[k..];
+        const target = if (direct) vertex_data[k..] else transposed[k..];
         const last = last_vertex[k..][0..4];
 
         switch (channel & 3) {
@@ -1743,10 +1750,11 @@ fn decodeVertexBlockSimd(
         }
     }
 
-    @memcpy(vertex_data, transposed[0 .. vertex_count * vertex_size]);
+    const decoded = if (direct) vertex_data else transposed[0 .. vertex_count * vertex_size];
+    if (!direct) @memcpy(vertex_data, decoded);
 
     const last_offset = vertex_size * (vertex_count - 1);
-    @memcpy(last_vertex[0..vertex_size], transposed[last_offset..][0..vertex_size]);
+    @memcpy(last_vertex[0..vertex_size], decoded[last_offset..][0..vertex_size]);
 
     return pos;
 }

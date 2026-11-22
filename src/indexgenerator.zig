@@ -197,10 +197,22 @@ pub inline fn hashLookup(
     key: T,
     empty: T,
 ) usize {
+    return hashLookupHashed(T, table, hasher, key, empty, hasher.hash(key));
+}
+
+/// `hashLookup` with `hash`, the value of `hasher.hash(key)`, taken before.
+pub inline fn hashLookupHashed(
+    comptime T: type,
+    table: []const T,
+    hasher: anytype,
+    key: T,
+    empty: T,
+    hash: u32,
+) usize {
     assert(std.math.isPowerOfTwo(table.len));
 
     const hashmod = table.len - 1;
-    var bucket = hasher.hash(key) & hashmod;
+    var bucket = hash & hashmod;
 
     for (0..table.len) |probe| {
         const item = table[bucket];
@@ -215,6 +227,19 @@ pub inline fn hashLookup(
     unreachable;
 }
 
+/// How many keys ahead of a lookup the remap loops take its hash and
+/// prefetch its bucket. On large meshes nearly every bucket misses the
+/// caches; taken in turn, each lookup waits for its own miss, and taken
+/// ahead the misses overlap. The buckets and the results are the same.
+pub const lookahead = 16;
+
+/// The hash of the vertex `index`, with its bucket in `table` prefetched.
+inline fn hashAhead(table: []const u32, hasher: anytype, index: u32) u32 {
+    const hash: u32 = @truncate(hasher.hash(index));
+    @prefetch(&table[hash & (table.len - 1)], .{});
+    return hash;
+}
+
 fn buildPositionRemap(scratch: *Scratch, remap: []u32, positions: VertexFloats) !void {
     const vertex_hasher: VertexHasher = .{ .stream = .{
         .data = std.mem.sliceAsBytes(positions.data),
@@ -225,9 +250,19 @@ fn buildPositionRemap(scratch: *Scratch, remap: []u32, positions: VertexFloats) 
     const vertex_table = try scratch.alloc(u32, hashBuckets(remap.len));
     @memset(vertex_table, none);
 
+    // Each vertex's hash is taken `lookahead` vertices before its lookup.
+    var ahead: [lookahead]u32 = undefined;
+    for (0..@min(lookahead, remap.len)) |j| ahead[j] = hashAhead(vertex_table, vertex_hasher, @intCast(j));
+
     for (remap, 0..) |*r, i| {
         const index: u32 = @intCast(i);
-        const entry = hashLookup(u32, vertex_table, vertex_hasher, index, none);
+        const slot = i % lookahead;
+        const hash = ahead[slot];
+        if (i + lookahead < remap.len) {
+            ahead[slot] = hashAhead(vertex_table, vertex_hasher, @intCast(i + lookahead));
+        }
+
+        const entry = hashLookupHashed(u32, vertex_table, vertex_hasher, index, none, hash);
 
         if (vertex_table[entry] == none) vertex_table[entry] = index;
 
@@ -252,8 +287,40 @@ fn generateRemap(
 
     var next_vertex: u32 = 0;
 
+    // Without indices, each vertex's hash is taken `lookahead` vertices
+    // before its lookup. With them, most indices name a vertex the remap
+    // already holds, and taking hashes ahead costs more than it saves.
+    if (indices == null) {
+        var ahead: [lookahead]u32 = undefined;
+        assert(index_count <= remap.len);
+        for (0..@min(lookahead, index_count)) |j| ahead[j] = hashAhead(table, hasher, @intCast(j));
+
+        for (0..index_count) |i| {
+            const index: u32 = @intCast(i);
+
+            const slot = i % lookahead;
+            const hash = ahead[slot];
+            if (i + lookahead < index_count) {
+                ahead[slot] = hashAhead(table, hasher, @intCast(i + lookahead));
+            }
+
+            const entry = hashLookupHashed(u32, table, hasher, index, none, hash);
+
+            if (table[entry] == none) {
+                table[entry] = index;
+                remap[index] = next_vertex;
+                next_vertex += 1;
+            } else {
+                assert(remap[table[entry]] != none);
+                remap[index] = remap[table[entry]];
+            }
+        }
+
+        return next_vertex;
+    }
+
     for (0..index_count) |i| {
-        const index: u32 = if (indices) |list| list[i] else @intCast(i);
+        const index: u32 = indices.?[i];
         assert(index < remap.len);
 
         if (remap[index] != none) continue;
@@ -320,6 +387,39 @@ fn generateShadowBuffer(
     }
 }
 
+/// The triangle `i` of `indices` with its corners remapped and rotated so
+/// the smallest leads, keeping the winding; or null if it is degenerate.
+inline fn triangleKey(comptime Index: type, indices: []const Index, remap: []const u32, i: usize) ?TriangleKey {
+    const a = indices[i * 3 + 0];
+    const b = indices[i * 3 + 1];
+    const c = indices[i * 3 + 2];
+    assert(a < remap.len and b < remap.len and c < remap.len);
+
+    var ra = remap[a];
+    var rb = remap[b];
+    var rc = remap[c];
+
+    // A degenerate triangle.
+    if (ra == rb or ra == rc or rb == rc) return null;
+
+    // Canonical rotation, which keeps the winding.
+    if (rb < ra and rb < rc) {
+        // abc -> bca
+        const t = ra;
+        ra = rb;
+        rb = rc;
+        rc = t;
+    } else if (rc < ra and rc < rb) {
+        // abc -> cab
+        const t = rc;
+        rc = rb;
+        rb = ra;
+        ra = t;
+    }
+
+    return .{ .a = ra, .b = rb, .c = rc };
+}
+
 fn filterTriangles(
     comptime Index: type,
     scratch: *Scratch,
@@ -331,40 +431,36 @@ fn filterTriangles(
 
     const face_count = indices.len / 3;
     const table = try scratch.alloc(TriangleKey, hashBuckets(face_count));
-    @memset(table, empty);
+    // As bytes, which LLVM turns into a call to memset; a 12-byte struct
+    // it fills one field at a time.
+    // The empty key is all ones, padding-free, in whatever order Zig lays
+    // out its fields.
+    comptime assert(none == std.math.maxInt(u32) and @sizeOf(TriangleKey) == 12);
+    @memset(std.mem.sliceAsBytes(table), 0xff);
+    const hasher: TriangleKeyHasher = .{};
+
+    // Prefetching pays only for a table larger than the caches near the
+    // core; on a smaller one it is pure overhead.
+    const prefetch = table.len * @sizeOf(TriangleKey) > 1 << 20;
 
     var write: usize = 0;
 
     for (0..face_count) |i| {
+        // The bucket of the triangle `lookahead` triangles on is
+        // prefetched, so the misses on a large table overlap. `destination`
+        // may be `indices`, but only up to triangle `i` is written.
+        if (prefetch and i + lookahead < face_count) {
+            if (triangleKey(Index, indices, remap, i + lookahead)) |later| {
+                @prefetch(&table[hasher.hash(later) & (table.len - 1)], .{});
+            }
+        }
+
         const a = indices[i * 3 + 0];
         const b = indices[i * 3 + 1];
         const c = indices[i * 3 + 2];
-        assert(a < remap.len and b < remap.len and c < remap.len);
 
-        var ra = remap[a];
-        var rb = remap[b];
-        var rc = remap[c];
-
-        // A degenerate triangle.
-        if (ra == rb or ra == rc or rb == rc) continue;
-
-        // Canonical rotation, which keeps the winding.
-        if (rb < ra and rb < rc) {
-            // abc -> bca
-            const t = ra;
-            ra = rb;
-            rb = rc;
-            rc = t;
-        } else if (rc < ra and rc < rb) {
-            // abc -> cab
-            const t = rc;
-            rc = rb;
-            rb = ra;
-            ra = t;
-        }
-
-        const key: TriangleKey = .{ .a = ra, .b = rb, .c = rc };
-        const entry = hashLookup(TriangleKey, table, TriangleKeyHasher{}, key, empty);
+        const key = triangleKey(Index, indices, remap, i) orelse continue;
+        const entry = hashLookup(TriangleKey, table, hasher, key, empty);
 
         // A duplicate triangle.
         if (table[entry].a != none) continue;

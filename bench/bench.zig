@@ -15,7 +15,8 @@ const meshes = @import("meshes");
 const Vertex = meshes.Vertex;
 const clod = mo.clusterlod;
 
-const runs = 11;
+/// 11 unless `zig build bench -Dbench-runs=<n>` says otherwise.
+const runs = @import("bench_options").runs;
 
 /// What one call of a case processes, for its throughput: a case declares
 /// `pub fn work(self) Work`, or has a `bytes` field. (`@hasDecl` sees only
