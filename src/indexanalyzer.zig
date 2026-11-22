@@ -157,13 +157,7 @@ pub fn analyzeVertexFetch(
         const start_tag = start_address / cache_line;
         const end_tag = (end_address + cache_line - 1) / cache_line;
 
-        assert(start_tag < end_tag);
-
-        // A vertex spans at least one line, and most only one: the loop
-        // tests its end after each line, so that LLVM does not unroll it
-        // behind a count check that one line never gets past.
-        var tag = start_tag;
-        while (true) {
+        for (start_tag..end_tag) |tag| {
             const line = tag % cache.len;
 
             // Lines hold their tag plus one, as the cache starts zeroed.
@@ -171,9 +165,6 @@ pub fn analyzeVertexFetch(
             // the line size: a miss is too unpredictable to branch on.
             result.bytes_fetched +%= @as(u32, @intFromBool(cache[line] != tag + 1)) * cache_line;
             cache[line] = tag + 1;
-
-            tag += 1;
-            if (tag == end_tag) break;
         }
     }
 

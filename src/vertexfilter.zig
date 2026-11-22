@@ -777,10 +777,6 @@ fn storeComponents(comptime T: type, out: *[4 * @sizeOf(T)]u8, values: [4]i32) v
     }
 }
 
-/// Encodes unit quaternions for `decodeFilterQuat`: each quaternion in
-/// `data` is 4 floats and becomes 8 bytes of `destination` (`stride` 8),
-/// three components of `bits` bits (4 to 16) and the index of the largest,
-/// dropped one.
 const quat_lanes = 8;
 
 /// `encodeFilterQuat` on `quat_lanes` quaternions, each lane doing what the
@@ -845,6 +841,10 @@ fn interleave4(comptime n: usize) [4 * n]i32 {
     return m;
 }
 
+/// Encodes unit quaternions for `decodeFilterQuat`: each quaternion in
+/// `data` is 4 floats and becomes 8 bytes of `destination` (`stride` 8),
+/// three components of `bits` bits (4 to 16) and the index of the largest,
+/// dropped one.
 pub fn encodeFilterQuat(destination: []u8, stride: usize, bits: u5, data: []const f32) void {
     assert(stride == 8);
     assert(bits >= 4 and bits <= 16);

@@ -113,6 +113,7 @@ pub fn build(b: *std.Build) void {
         "bench-runs",
         "Timed calls of each side per benchmark case (default 11)",
     ) orelse 11;
+    if (bench_runs == 0) @panic("-Dbench-runs needs at least 1");
     const bench_options = b.addOptions();
     bench_options.addOption(u32, "runs", bench_runs);
     const bench = b.addExecutable(.{

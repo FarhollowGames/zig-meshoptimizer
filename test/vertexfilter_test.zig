@@ -316,6 +316,30 @@ test "the encoders match the original on special floats" {
     try checkAll(data.items, data.items, data.items, data.items, .any);
 }
 
+test "encodeFilterQuat matches the original at every count around its vector width" {
+    // The encoder takes eight quaternions at a time, then the rest one at a
+    // time: counts from 0 to 17, starting at several places among the
+    // special floats, so NaN, infinities and -0 reach both paths.
+    var data: std.ArrayList(f32) = .empty;
+    defer data.deinit(gpa);
+    for (special_floats) |x| for (special_floats) |y| {
+        const z = special_floats[(data.items.len / 4) % special_floats.len];
+        const w = special_floats[(data.items.len / 4 + 7) % special_floats.len];
+        try data.appendSlice(gpa, &.{ x, y, z, w });
+    };
+    const quats = data.items.len / 4;
+    var start: usize = 0;
+    while (start + 17 <= quats) : (start += 53) {
+        for (0..18) |count| {
+            const slice = data.items[start * 4 ..][0 .. count * 4];
+            for ([_]u5{ 4, 9, 16 }) |bits| {
+                const encoded = try checkEncode(.quat, slice, 8, bits, .separate, .any);
+                gpa.free(encoded);
+            }
+        }
+    }
+}
+
 test "encodeFilterExp matches the original at 24 bits around every power of two" {
     // Mantissas of all ones round up to the next power of two at 24 bits,
     // where the mantissa must clamp.

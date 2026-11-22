@@ -1887,11 +1887,11 @@ test "the NEON decoder counts sixteen sentinels in 2- and 4-bit groups as zero" 
 test "every decoder round-trips a buffer past the prefetch size" {
     // Over 1 MB, so whole blocks decode straight into the destination with
     // their lines prefetched, and a count that leaves a part block at the
-    // end, which goes through the block buffer; 16- and 32-byte vertices
-    // fill a block with 256 vertices, 12-byte ones with fewer.
+    // end, which goes through the block buffer. Vertices up to 32 bytes
+    // fill a block with 256 vertices; 48- and 64-byte ones with fewer.
     var prng: std.Random.DefaultPrng = .init(11);
     const rng = prng.random();
-    for ([_]usize{ 12, 16, 32 }) |vertex_size| {
+    for ([_]usize{ 12, 16, 32, 48, 64 }) |vertex_size| {
         const count = (1 << 20) / vertex_size + 1000 + 7;
         const vertices = try testing.allocator.alloc(u8, count * vertex_size);
         defer testing.allocator.free(vertices);

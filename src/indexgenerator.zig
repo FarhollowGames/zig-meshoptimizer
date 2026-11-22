@@ -231,7 +231,7 @@ pub inline fn hashLookupHashed(
 /// prefetch its bucket. On large meshes nearly every bucket misses the
 /// caches; taken in turn, each lookup waits for its own miss, and taken
 /// ahead the misses overlap. The buckets and the results are the same.
-pub const lookahead = 16;
+const lookahead = 16;
 
 /// The hash of the vertex `index`, with its bucket in `table` prefetched.
 inline fn hashAhead(table: []const u32, hasher: anytype, index: u32) u32 {
