@@ -781,6 +781,70 @@ fn storeComponents(comptime T: type, out: *[4 * @sizeOf(T)]u8, values: [4]i32) v
 /// `data` is 4 floats and becomes 8 bytes of `destination` (`stride` 8),
 /// three components of `bits` bits (4 to 16) and the index of the largest,
 /// dropped one.
+const quat_lanes = 8;
+
+/// `encodeFilterQuat` on `quat_lanes` quaternions, each lane doing what the
+/// one-at-a-time loop does to one quaternion.
+inline fn encodeQuatLanes(out: *align(1) [quat_lanes * 4]i16, data: *const [quat_lanes * 4]f32, bits: u5, top: i16) void {
+    const F = @Vector(quat_lanes, f32);
+    const U = @Vector(quat_lanes, u32);
+
+    const all: @Vector(quat_lanes * 4, f32) = data.*;
+    var comps: [4]F = undefined;
+    inline for (&comps, 0..) |*comp, k| {
+        comp.* = @shuffle(f32, all, undefined, strided(quat_lanes, 4, k));
+    }
+
+    // The largest component, by the same comparisons in the same order.
+    var qc: U = @splat(0);
+    var largest = comps[0];
+    var largest_abs = @abs(comps[0]);
+    inline for (1..4) |k| {
+        const greater = @abs(comps[k]) > largest_abs;
+        qc = @select(u32, greater, @as(U, @splat(k)), qc);
+        largest = @select(f32, greater, comps[k], largest);
+        largest_abs = @select(f32, greater, @abs(comps[k]), largest_abs);
+    }
+
+    const sign = @select(f32, largest < @as(F, @splat(0)), @as(F, @splat(-1)), @as(F, @splat(1)));
+    const scaler: F = @splat(@sqrt(@as(f32, 2)));
+
+    // The components after the largest, cyclically.
+    var d: [4]@Vector(quat_lanes, i16) = undefined;
+    inline for (0..3) |j| {
+        const at = (qc + @as(U, @splat(j + 1))) & @as(U, @splat(3));
+        var v = comps[0];
+        inline for (1..4) |k| v = @select(f32, at == @as(U, @splat(k)), comps[k], v);
+        d[j] = @truncate(quantization.quantizeSnorm(v * scaler * sign, bits));
+    }
+    d[3] = @as(@Vector(quat_lanes, i16), @splat(top)) | @as(@Vector(quat_lanes, i16), @intCast(qc));
+
+    // Back to four values a quaternion.
+    const lo = std.simd.join(d[0], d[1]);
+    const hi = std.simd.join(d[2], d[3]);
+    out.* = @shuffle(i16, lo, hi, interleave4(quat_lanes));
+}
+
+/// Lane indices `k`, `k + step`, `k + 2 * step` and so on, `n` of them.
+fn strided(comptime n: usize, comptime step: usize, comptime k: usize) [n]i32 {
+    var m: [n]i32 = undefined;
+    for (&m, 0..) |*e, i| e.* = @intCast(i * step + k);
+    return m;
+}
+
+/// The shuffle that interleaves four vectors of `n` lanes, the first two
+/// joined as the first operand and the last two as the second.
+fn interleave4(comptime n: usize) [4 * n]i32 {
+    var m: [4 * n]i32 = undefined;
+    for (0..n) |i| {
+        m[i * 4 + 0] = @intCast(i);
+        m[i * 4 + 1] = @intCast(n + i);
+        m[i * 4 + 2] = ~@as(i32, @intCast(i));
+        m[i * 4 + 3] = ~@as(i32, @intCast(n + i));
+    }
+    return m;
+}
+
 pub fn encodeFilterQuat(destination: []u8, stride: usize, bits: u5, data: []const f32) void {
     assert(stride == 8);
     assert(bits >= 4 and bits <= 16);
@@ -793,7 +857,16 @@ pub fn encodeFilterQuat(destination: []u8, stride: usize, bits: u5, data: []cons
     const Quat = @Vector(4, f32);
     const top: i16 = @truncate(quantization.quantizeSnorm(1, bits) & ~@as(i32, 3));
 
-    for (0..count) |i| {
+    // Eight quaternions at a time, their components in a vector each, as
+    // the original's compiler vectorizes its loop; then one at a time.
+    const head = count - count % quat_lanes;
+    var first: usize = 0;
+    while (first < head) : (first += quat_lanes) {
+        const lanes = quat_lanes * 4;
+        encodeQuatLanes(out[first * 4 ..][0..lanes], data[first * 4 ..][0..lanes], bits, top);
+    }
+
+    for (head..count) |i| {
         const q: Quat = data[i * 4 ..][0..4].*;
 
         // The largest component.

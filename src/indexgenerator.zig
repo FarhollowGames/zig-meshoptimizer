@@ -353,9 +353,42 @@ fn remapVertices(
     for (remap, 0..) |r, i| {
         if (r != none) {
             assert(r < remap.len);
-            @memcpy(destination[r * size ..][0..size], vertices[i * size ..][0..size]);
+            const to = destination[r * size ..][0..size];
+            const from = vertices[i * size ..][0..size];
+            if (block_size == 0) copyVertex(to, from) else @memcpy(to, from);
         }
     }
+}
+
+/// Copies a vertex of any size: up to 64 bytes as two moves of a fixed size
+/// that overlap, instead of a call to `memcpy`, which costs more than the
+/// copy; the original calls the C library's, which is quicker to reach.
+inline fn copyVertex(to: []u8, from: []const u8) void {
+    assert(to.len == from.len);
+    const n = from.len;
+    switch (n) {
+        0 => {},
+        1...3 => {
+            to[0] = from[0];
+            to[n / 2] = from[n / 2];
+            to[n - 1] = from[n - 1];
+        },
+        inline 4, 8, 16, 32 => |half| copyOverlapping(half, to, from),
+        5...7 => copyOverlapping(4, to, from),
+        9...15 => copyOverlapping(8, to, from),
+        17...31 => copyOverlapping(16, to, from),
+        33...64 => copyOverlapping(32, to, from),
+        else => @memcpy(to, from),
+    }
+}
+
+/// Copies `from` (`half` to `2 * half` bytes) as its first and last `half`
+/// bytes, loaded both before either is stored.
+inline fn copyOverlapping(comptime half: usize, to: []u8, from: []const u8) void {
+    const first = from[0..half].*;
+    const last = from[from.len - half ..][0..half].*;
+    to[0..half].* = first;
+    to[to.len - half ..][0..half].* = last;
 }
 
 fn generateShadowBuffer(
@@ -1070,4 +1103,17 @@ test "remapping in place" {
     const bytes = std.mem.sliceAsBytes(&vertices);
     try remapVertexBuffer(testing.allocator, bytes, bytes, @sizeOf(u32), &remap);
     try testing.expectEqualSlices(u32, &.{ 7, 3, 9 }, vertices[0..3]);
+}
+
+test "a vertex copies whole at every size" {
+    var from: [256]u8 = undefined;
+    for (&from, 0..) |*b, i| b.* = @truncate(i * 7 + 1);
+    for (0..from.len + 1) |n| {
+        var to: [258]u8 = @splat(0xee);
+        copyVertex(to[1..][0..n], from[0..n]);
+        try std.testing.expectEqualSlices(u8, from[0..n], to[1..][0..n]);
+        // Nothing around it changes.
+        try std.testing.expectEqual(0xee, to[0]);
+        try std.testing.expectEqual(0xee, to[n + 1]);
+    }
 }
