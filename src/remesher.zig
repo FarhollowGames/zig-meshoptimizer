@@ -476,6 +476,23 @@ fn isEmptyRow(row: []const u8) bool {
     return true;
 }
 
+/// The inclusive prefix sums of `v`, wrapping, by shifting and adding in
+/// steps of 1, 2, 4, 8 and 16 lanes.
+fn prefixSum(v: RowChunk) RowChunk {
+    const zero: RowChunk = @splat(0);
+    var sums = v;
+    inline for (0..std.math.log2(row_lanes)) |step| {
+        const shift = 1 << step;
+        const mask = comptime mask: {
+            var m: [row_lanes]i32 = undefined;
+            for (&m, 0..) |*e, i| e.* = if (i >= shift) i - shift else ~@as(i32, 0);
+            break :mask m;
+        };
+        sums +%= @shuffle(u8, sums, zero, mask);
+    }
+    return sums;
+}
+
 fn rowpack(grid: []u8, rowmap: []u32, resolution: usize) usize {
     var result: usize = 0;
 
@@ -488,14 +505,26 @@ fn rowpack(grid: []u8, rowmap: []u32, resolution: usize) usize {
             continue;
         }
 
+        // Each occupied voxel gets the running count of the row's voxels, a
+        // vector at a time as a prefix sum. Voxelizing only writes 0 or 1,
+        // so the count times the voxel is the number or 0.
         var count: u32 = 0;
+        var x: usize = 0;
 
-        for (data) |*d| {
-            // Voxelizing only writes 0 or 1.
+        while (x + row_lanes <= data.len) : (x += row_lanes) {
+            const chunk: RowChunk = data[x..][0..row_lanes].*;
+            assert(@reduce(.Max, chunk) <= 1);
+
+            const sums = prefixSum(chunk) +% @as(RowChunk, @splat(@truncate(count)));
+            data[x..][0..row_lanes].* = sums *% chunk;
+            count += @reduce(.Add, @as(@Vector(row_lanes, u16), chunk));
+        }
+
+        for (data[x..]) |*d| {
             assert(d.* <= 1);
 
             count += d.*;
-            d.* = if (d.* != 0) @intCast(count) else 0;
+            d.* = if (d.* != 0) @truncate(count) else 0;
         }
 
         // A voxel's number is one byte, with 0 for empty voxels and
@@ -1049,4 +1078,41 @@ test "a cube remeshes into a closed mesh" {
     defer testing.allocator.free(triangles);
     const count = try remesh(u32, testing.allocator, triangles, &indices, view, 8, .{});
     try testing.expect(count > 0 and count <= bound);
+}
+
+test "rows are numbered on vectors as one at a time" {
+    // Rows of whole vectors and a tail, as random 0s and 1s, against the
+    // running count a voxel at a time.
+    var prng: std.Random.DefaultPrng = .init(3);
+    const random = prng.random();
+    for ([_]usize{ 4, 31, 32, 33, 64, 100, 255, 256 }) |resolution| {
+        for (0..50) |round| {
+            var grid: [256]u8 = undefined;
+            var want: [256]u8 = undefined;
+            const row = grid[0..resolution];
+            // Some rows full, some sparse, some empty.
+            const density = random.uintLessThan(u32, 4);
+            for (row) |*d| d.* = @intFromBool(random.uintLessThan(u32, 3) < density);
+            if (round == 0) @memset(row, 1);
+            // The grid's border voxels stay empty, as voxelizing leaves
+            // them, which keeps a row's count below `inside`.
+            row[0] = 0;
+            row[resolution - 2] = 0;
+            row[resolution - 1] = 0;
+            var count: u32 = 0;
+            for (row, want[0..resolution]) |d, *w| {
+                count += d;
+                w.* = if (d != 0) @truncate(count) else 0;
+            }
+            var rowmap: [1]u32 = undefined;
+            const total = rowpack(row, &rowmap, resolution);
+            try std.testing.expectEqual(count, total);
+            if (count == 0) {
+                try std.testing.expectEqual(empty_row, rowmap[0]);
+            } else {
+                try std.testing.expectEqual(0, rowmap[0]);
+                try std.testing.expectEqualSlices(u8, want[0..resolution], row);
+            }
+        }
+    }
 }
