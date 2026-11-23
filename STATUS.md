@@ -21,9 +21,9 @@ of `src/meshoptimizer.h`, the functions upstream exports outside it, and
   oracle-tested and give their times; doc/BENCHMARKS.md says why.
 - **reviewed**: checked by a reviewer after the tuning pass.
 
-A performance pass and a skeptic's review by an agent that did not write
-the port have gone over every feature below, and the author has read their
-findings, so every row is reviewed; the state after "reviewed" is the
+Two performance passes, each followed by a skeptic's review by an agent
+that did not write the port, have gone over every feature below, and the
+author has read their findings, so every row is reviewed; the state after "reviewed" is the
 furthest its tests and the benchmark go. The one row left out stays left
 out, by the author's decision.
 
@@ -32,21 +32,21 @@ Loomwork's bake calls `generateVertexRemap`, `remapVertexBuffer`,
 `buildMeshlets` and `optimizeMeshlet`.
 
 Times below are the port's over the original's, on the demo mesh and on the
-large mesh.
+large mesh, in the run in [doc/BENCHMARKS.md](doc/BENCHMARKS.md).
 
 ## Index generation (indexgenerator.cpp)
 
 | function, option or mode | state |
 | --- | --- |
 | `generateVertexRemap`, with and without an index buffer | reviewed, benchmarked |
-| `generateVertexRemapMulti` (`Stream`s) | reviewed, oracle-tested; 1.07 and 1.09 |
+| `generateVertexRemapMulti` (`Stream`s) | reviewed, benchmarked |
 | `generateVertexRemapCustom` (a comparison callback, as a comptime context) | reviewed, benchmarked |
 | `remapVertexBuffer`, also in place | reviewed, benchmarked |
-| `remapIndexBuffer`, with and without an index buffer, also in place | reviewed, benchmarked |
-| `filterIndexBuffer` | reviewed, oracle-tested; 0.96 and 1.13 |
-| `filterIndexBufferMulti` | reviewed, oracle-tested; 0.99 and 1.08 |
-| `generateShadowIndexBuffer` | reviewed, benchmarked |
-| `generateShadowIndexBufferMulti` | reviewed, benchmarked |
+| `remapIndexBuffer`, with and without an index buffer, also in place | reviewed, oracle-tested; 1.12 (a 2 µs case) and 0.99 |
+| `filterIndexBuffer` | reviewed, benchmarked |
+| `filterIndexBufferMulti` | reviewed, benchmarked |
+| `generateShadowIndexBuffer` | reviewed, oracle-tested; 1.31 and 1.15 |
+| `generateShadowIndexBufferMulti` | reviewed, oracle-tested; 0.92 and 1.06 |
 | `generatePositionRemap` | reviewed, benchmarked |
 | `generateAdjacencyIndexBuffer` | reviewed, benchmarked |
 | `generateTessellationIndexBuffer` | reviewed, benchmarked |
@@ -65,7 +65,7 @@ large mesh.
 
 | function, option or mode | state |
 | --- | --- |
-| `optimizeOverdraw`, any `threshold` | reviewed, benchmarked |
+| `optimizeOverdraw`, any `threshold` | reviewed, oracle-tested; 1.08 and 1.04 |
 | `optimizeVertexFetch`, also in place | reviewed, benchmarked |
 | `optimizeVertexFetchRemap` | reviewed, benchmarked |
 
@@ -77,7 +77,7 @@ large mesh.
 | `encodeIndexBufferBound` | reviewed, oracle-tested |
 | `decodeIndexBuffer`, 16- and 32-bit indices, every error (`IndexDecodeError`) | reviewed, benchmarked |
 | `decodeIndexVersion` | reviewed, oracle-tested |
-| `encodeIndexSequence`, versions 0 and 1 | reviewed, oracle-tested; 1.07 and 1.02 |
+| `encodeIndexSequence`, versions 0 and 1 | reviewed, benchmarked |
 | `encodeIndexSequenceBound` | reviewed, oracle-tested |
 | `decodeIndexSequence`, 16- and 32-bit indices, every error | reviewed, benchmarked |
 
@@ -88,7 +88,7 @@ large mesh.
 | `encodeMeshlet` | reviewed, benchmarked |
 | `encodeMeshletBound` | reviewed, oracle-tested |
 | `decodeMeshlet`, every vertex and triangle element size, SIMD path (x86) and scalar path, every error (`MeshletDecodeError`) | reviewed, benchmarked |
-| `decodeMeshletRaw`, SIMD path (x86) and scalar path | reviewed, oracle-tested; 1.07 and 1.06 |
+| `decodeMeshletRaw`, SIMD path (x86) and scalar path | reviewed, benchmarked |
 | `decodeMeshlet` and `decodeMeshletRaw` with NEON (aarch64) | reviewed, oracle-tested, under QEMU |
 
 ## Vertex codec (vertexcodec.cpp)
@@ -98,7 +98,7 @@ large mesh.
 | `encodeVertexBuffer` (level 2, version 1) | reviewed, benchmarked |
 | `encodeVertexBufferLevel`, levels 1 to 3 (4 to 9 encode as 3) | reviewed, benchmarked |
 | `encodeVertexBufferLevel`, level 0 | reviewed, benchmarked |
-| version 0 encoding (`VertexVersion`, in place of `meshopt_encodeVertexVersion`) | reviewed, oracle-tested; 1.10 encoding the sphere, 0.95 to 1.05 elsewhere |
+| version 0 encoding (`VertexVersion`, in place of `meshopt_encodeVertexVersion`) | reviewed, benchmarked |
 | channel encodings: byte deltas, 16-bit deltas, rotated xor deltas | reviewed, oracle-tested |
 | control modes: bit groups 0/1/2/4 and 1/2/4/8, zeros, literals; version 0's 0/2/4/8 | reviewed, oracle-tested |
 | `encodeVertexBufferBound` | reviewed, oracle-tested |
@@ -125,15 +125,15 @@ large mesh.
 | `encodeFilterQuat`, `bits` 4 to 16 | reviewed, benchmarked |
 | `encodeFilterExp`, `EncodeExpMode` `separate` and `shared_component`, `bits` 1 to 24, also in place | reviewed, benchmarked |
 | `encodeFilterExp`, modes `shared_vector` and `clamped` | reviewed, benchmarked |
-| `encodeFilterColor`, strides 4 and 8, `bits` 2 to 16 | reviewed, benchmarked |
+| `encodeFilterColor`, strides 4 and 8, `bits` 2 to 16 | reviewed, oracle-tested; 1.02 at 8 bits, 1.09 at 16 |
 
 ## Simplification (simplifier.cpp)
 
 | function, option or mode | state |
 | --- | --- |
-| `simplify` | reviewed, oracle-tested; 1.01 and 1.07 |
-| `simplifyWithAttributes`: 0 to 32 attributes, any weights, vertex flags | reviewed, oracle-tested; 1.08 and 1.10 |
-| `simplifyWithUpdate`: positions and attributes updated in place | reviewed, oracle-tested; 1.06 and 1.04 |
+| `simplify` | reviewed, benchmarked |
+| `simplifyWithAttributes`: 0 to 32 attributes, any weights, vertex flags | reviewed, benchmarked |
+| `simplifyWithUpdate`: positions and attributes updated in place | reviewed, benchmarked |
 | `simplifyEdge` (`meshopt_simplifyEdge`, exported but not in the header): its internal solve and debug bits | reviewed, oracle-tested |
 | `SimplifyOptions`: `lock_border`, `sparse`, `error_absolute`, `prune`, `regularize`, `permissive`, `regularize_light`, `preserve_folds`, `error_clamped`, alone and in all 512 combinations | reviewed, oracle-tested |
 | `SimplifyVertexFlags`: `lock`, `protect`, `priority`, alone and combined, other bits ignored | reviewed, oracle-tested |
@@ -148,7 +148,7 @@ large mesh.
 | --- | --- |
 | `stripify`, restart index 0 or none | reviewed, benchmarked |
 | `stripifyBound` | reviewed, oracle-tested |
-| `unstripify`, with and without a restart index | reviewed, oracle-tested; 1.35 (a 5 µs case with a 91% spread) and 0.82 |
+| `unstripify`, with and without a restart index | reviewed, benchmarked |
 | `unstripifyBound` | reviewed, oracle-tested |
 
 ## Analysis (indexanalyzer.cpp, rasterizer.cpp)
@@ -156,7 +156,7 @@ large mesh.
 | function, option or mode | state |
 | --- | --- |
 | `analyzeVertexCache` (`VertexCacheStatistics`), any cache, warp and primitive group size | reviewed, benchmarked |
-| `analyzeVertexFetch` (`VertexFetchStatistics`) | reviewed, oracle-tested; 1.17 and 1.08 |
+| `analyzeVertexFetch` (`VertexFetchStatistics`) | reviewed, oracle-tested; 1.12 and 1.05 |
 | `analyzeOverdraw` (`OverdrawStatistics`) | reviewed, benchmarked |
 | `analyzeCoverage` (`CoverageStatistics`) | reviewed, benchmarked |
 
@@ -168,17 +168,17 @@ large mesh.
 | `buildMeshlets`, `cone_weight` 0 to 1 | reviewed, benchmarked |
 | `buildMeshletsScan` | reviewed, benchmarked |
 | `buildMeshletsFlex`: `min_triangles` to `max_triangles`, `cone_weight`, `split_factor` | reviewed, benchmarked |
-| `buildMeshletsSpatial`, `fill_weight`, with the SSE box merge (x86) | reviewed, oracle-tested; 1.03 and 1.09 |
+| `buildMeshletsSpatial`, `fill_weight`, with the SSE box merge (x86) | reviewed, oracle-tested; 1.03 and 1.07 |
 | `buildMeshletsSpatial` without SIMD (other targets), on finite positions | reviewed, oracle-tested |
 | `buildMeshletsSpatial` with the NEON box merge (aarch64) | reviewed, oracle-tested, under QEMU |
 | limits up to `max_vertices` 256 and `max_triangles` 512; position strides from 12 to 256 bytes | reviewed, oracle-tested |
-| `optimizeMeshlet` | reviewed, oracle-tested; 1.04 and 1.08 |
+| `optimizeMeshlet` | reviewed, benchmarked |
 | `optimizeMeshletLevel`, levels 0 to 9 | reviewed, benchmarked |
 | `Bounds`, `computeClusterBounds` | reviewed, benchmarked |
 | `computeMeshletBounds` | reviewed, benchmarked |
 | `computeSphereBounds`, of points and of spheres (`radii`) | reviewed, benchmarked |
 | `extractMeshletIndices` | reviewed, benchmarked |
-| `partitionClusters`, with and without positions, every `target_partition_size` | reviewed, oracle-tested; 1.01 and 1.06 |
+| `partitionClusters`, with and without positions, every `target_partition_size` | reviewed, benchmarked |
 
 ## Spatial order (spatialorder.cpp)
 
@@ -200,9 +200,9 @@ large mesh.
 
 | function, option or mode | state |
 | --- | --- |
-| `remesh`, resolutions 4 to 256; without a destination, the bound; with one, the exact count, cut off at its capacity | reviewed, oracle-tested; 1.04 to 1.06 on the demo mesh, 0.89 to 0.96 on the sphere |
-| `RemeshOptions` `shell` | reviewed, benchmarked |
-| `RemeshOptions` `solve` | reviewed, oracle-tested; 1.06 to 1.09 on the demo mesh, 0.93 to 0.98 on the sphere |
+| `remesh`, resolutions 4 to 256; without a destination, the bound; with one, the exact count, cut off at its capacity | reviewed, oracle-tested; 1.06 to 1.10 on the demo mesh, 0.97 to 0.98 on the sphere |
+| `RemeshOptions` `shell` | reviewed, oracle-tested; 1.05 to 1.08 on the demo mesh, 0.97 to 0.99 on the sphere |
+| `RemeshOptions` `solve` | reviewed, oracle-tested; 1.08 to 1.09 on the demo mesh, 0.99 to 1.06 on the sphere |
 | the hidden debug bit 30, not in the header: no named field, read from `reserved` as the original reads it | reviewed, oracle-tested |
 
 ## Opacity micromaps (opacitymap.cpp)
@@ -220,8 +220,8 @@ large mesh.
 
 | function, option or mode | state |
 | --- | --- |
-| `quantizeUnorm`, `quantizeSnorm` (the header's inline functions), every bit count | reviewed, oracle-tested; 4.85 and 5.12 as a loop of calls, which Zig leaves scalar |
-| `quantizeUnorm`, `quantizeSnorm` called on a vector of floats (an addition: the same function, each lane as a scalar call gives it) | reviewed, benchmarked; 1.00 and 1.00 on 16 lanes |
+| `quantizeUnorm`, `quantizeSnorm` (the header's inline functions), every bit count | reviewed, oracle-tested; 2.68 and 2.96 as a loop of calls, which Zig leaves scalar |
+| `quantizeUnorm`, `quantizeSnorm` called on a vector of floats (an addition: the same function, each lane as a scalar call gives it) | reviewed, benchmarked; 1.05 and 1.00 on 16 lanes |
 | `quantizeHalf`, on every float | reviewed, benchmarked |
 | `dequantizeHalf`, on every half | reviewed, benchmarked |
 | `quantizeFloat`, every bit count | reviewed, benchmarked |
@@ -233,7 +233,7 @@ large mesh.
 | --- | --- |
 | `meshopt_setAllocator`: every function that needs memory takes a `std.mem.Allocator`; the original's suite counts its allocations through its own hooks | reviewed, oracle-tested |
 | `meshopt_Allocator`: `Scratch`, the same allocations in the same order, freed newest first | reviewed, oracle-tested |
-| `meshopt_setAllocatorCache`: `AllocatorCache`, an allocator the caller makes over a backing allocator and passes, with a `Local` handle per thread; up to 64 blocks, sizes rounded down to 16 bytes, the size clamp on overflow, the block a handle held last or else the lowest free one, the original's fit test and 16-byte steps, the backing allocator for what does not fit, for alignment above 16 and when every block is taken; `deinit` with every block back; the same backing calls as the original's cache | reviewed, benchmarked |
+| `meshopt_setAllocatorCache`: `AllocatorCache`, an allocator the caller makes over a backing allocator and passes, with a `Local` handle per thread; up to 64 blocks, sizes rounded down to 16 bytes, the size clamp on overflow, the block a handle held last or else the lowest free one, the original's fit test and 16-byte steps, the backing allocator for what does not fit, for alignment above 16 and when every block is taken; `deinit` with every block back; the same backing calls as the original's cache | reviewed, oracle-tested; 1.08 under `simplify` on the demo mesh |
 | zero-length scratch arrays (empty meshes): the original asks its callbacks or cache for 0 bytes, which its cache rounds up to 16; the port's `Scratch` asks for nothing, as `std.mem.Allocator` hands out empty slices without a call, so the backing allocator can see fewer calls | reviewed, differs (approved) |
 
 ## Cluster LOD (demo/clusterlod.h)

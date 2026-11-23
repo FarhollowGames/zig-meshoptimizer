@@ -226,6 +226,38 @@ test "filterIndexBuffer and generateShadowIndexBuffer match the original on ever
     for (set.meshes) |mesh| try checkFilterAndShadow(mesh);
 }
 
+test "the index generator matches the original on a large mesh" {
+    // Past 52k triangles, so filterIndexBuffer's table is over 1 MB and it
+    // prefetches buckets ahead; with every triangle twice, once reversed,
+    // and some degenerate, so all its branches run. Its vertex soup checks
+    // the remap that hashes vertices ahead, on a table larger than the
+    // caches.
+    var sphere = try meshes.sphere(gpa, 200, 400);
+    defer sphere.deinit(gpa);
+
+    const base = sphere.indices;
+    const indices = try gpa.alloc(u32, base.len * 3);
+    for (0..base.len / 3) |t| {
+        const a = base[t * 3];
+        const b = base[t * 3 + 1];
+        const cc = base[t * 3 + 2];
+        // The triangle, then a rotated copy, then the reversed one, or a
+        // degenerate one now and then.
+        indices[t * 9 ..][0..9].* = if (t % 7 == 0)
+            .{ a, b, cc, b, cc, a, a, a, b }
+        else
+            .{ a, b, cc, b, cc, a, a, cc, b };
+    }
+    defer gpa.free(indices);
+    try checkFilterAndShadow(.{ .vertices = sphere.vertices, .indices = indices });
+
+    const soup = try gpa.alloc(Vertex, base.len);
+    defer gpa.free(soup);
+    for (base, soup) |index, *v| v.* = sphere.vertices[index];
+    try checkVertexRemap(soup, null);
+    try checkVertexRemap(sphere.vertices, base);
+}
+
 fn checkFilterAndShadow(mesh: common.Mesh) !void {
     const indices = mesh.indices;
     const bytes = std.mem.sliceAsBytes(mesh.vertices);

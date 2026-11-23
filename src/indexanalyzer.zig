@@ -161,14 +161,14 @@ pub fn analyzeVertexFetch(
             const line = tag % cache.len;
 
             // Lines hold their tag plus one, as the cache starts zeroed.
-            if (cache[line] != tag + 1) result.bytes_fetched +%= cache_line;
+            // Without a branch, as the original adds the comparison times
+            // the line size: a miss is too unpredictable to branch on.
+            result.bytes_fetched +%= @as(u32, @intFromBool(cache[line] != tag + 1)) * cache_line;
             cache[line] = tag + 1;
         }
     }
 
-    var unique_vertex_count: usize = 0;
-
-    for (vertex_visited) |visited| unique_vertex_count += visited;
+    const unique_vertex_count = countVisited(vertex_visited);
 
     result.overfetch = if (unique_vertex_count == 0)
         0
@@ -177,6 +177,28 @@ pub fn analyzeVertexFetch(
             @as(f32, @floatFromInt(unique_vertex_count * vertex_size));
 
     return result;
+}
+
+/// The sum of `visited`, whose bytes are 0 or 1, on vectors: the original's
+/// compiler vectorizes its loop, and Zig's does not.
+fn countVisited(visited: []const u8) usize {
+    const lanes = 64;
+    const V = @Vector(lanes, u8);
+    var total: usize = 0;
+    var i: usize = 0;
+
+    // A byte lane holds at most 255 ones, so the lanes are summed into the
+    // total every 255 vectors.
+    while (visited.len - i >= lanes) {
+        const vectors: usize = @min((visited.len - i) / lanes, 255);
+        const chunk_end = i + vectors * lanes;
+        var acc: V = @splat(0);
+        while (i < chunk_end) : (i += lanes) acc += visited[i..][0..lanes].*;
+        total += @reduce(.Add, @as(@Vector(lanes, u16), acc));
+    }
+
+    for (visited[i..]) |v| total += v;
+    return total;
 }
 
 // --------------------------------------------------------
@@ -192,4 +214,23 @@ test "a cached vertex costs nothing again" {
     try testing.expectEqual(4, stats.vertices_transformed);
     try testing.expectEqual(2.0, stats.acmr);
     try testing.expectEqual(1.0, stats.atvr);
+}
+
+test "the visited count on vectors matches a plain sum" {
+    // Past 255 vectors, so the byte lanes are flushed more than once, and a
+    // tail that is not a whole vector.
+    var prng: std.Random.DefaultPrng = .init(1);
+    const random = prng.random();
+    for ([_]usize{ 0, 1, 63, 64, 65, 255 * 64, 255 * 64 + 1, 100_003 }) |len| {
+        const visited = try testing.allocator.alloc(u8, len);
+        defer testing.allocator.free(visited);
+        var expected: usize = 0;
+        for (visited) |*v| {
+            v.* = @intFromBool(random.boolean());
+            expected += v.*;
+        }
+        try testing.expectEqual(expected, countVisited(visited));
+        @memset(visited, 1);
+        try testing.expectEqual(len, countVisited(visited));
+    }
 }

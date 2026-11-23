@@ -37,10 +37,10 @@ standard library, and links no libc or libc++. The original is listed under
 ## Install
 
 ```sh
-zig fetch --save git+https://github.com/farhollowgames/zig-meshoptimizer#v0.1.1
+zig fetch --save git+https://github.com/farhollowgames/zig-meshoptimizer#v0.1.4
 ```
 
-`v0.1.1` is the latest release. The package needs Zig 0.17.0.
+`v0.1.4` is the latest release. The package needs Zig 0.17.0.
 
 In `build.zig`:
 
@@ -150,21 +150,22 @@ million triangles:
 
 | feature | time, port / original | port vs original |
 | --- | ---: | ---: |
-| `generateVertexRemap` | 0.95 | 5% faster |
-| `optimizeVertexCache` | 0.99 | 1% faster |
-| `buildMeshlets` | 0.77 | 23% faster |
-| `simplify` | 1.07 | 7% slower |
-| `decodeVertexBuffer`, v1 level 2 | 1.03 | 3% slower |
+| `generateVertexRemap` | 0.56 | 44% faster |
+| `optimizeVertexCache` | 1.00 | the same |
+| `buildMeshlets` | 0.83 | 17% faster |
+| `simplify` | 0.99 | 1% faster |
+| `decodeVertexBuffer`, v1 level 2 | 0.94 | 6% faster |
 
 Over all 218 benchmark cases, the port's time is at most 5% above the
-original's in 192. The slowest are `quantizeUnorm` and `quantizeSnorm`
-called on one float at a time in a loop (4.85 and 5.12, about 5 times the
+original's in 198. The slowest are `quantizeUnorm` and `quantizeSnorm`
+called on one float at a time in a loop (2.68 and 2.96 times the
 original's time), which Zig does not vectorize; called on vectors of 16
 floats they take the original's time.
 
-AMD Ryzen 9 9950X3D, one core, Linux 7.3.3, Zig 0.17.0 ReleaseFast against
-clang 22.1.8 `-O3`, at commit `a57cfbb`; each row the median of three runs'
-medians; other builds ran on the other half of the processor.
+A 4-CPU cloud virtual machine (Intel Xeon, Emerald Rapids, 2.1 GHz), one
+core, Linux 6.18.44, Zig 0.17.0 ReleaseFast against clang 22.1.8 `-O3`, at
+commit `7c29101`; each row the median of three runs' medians. The host is
+shared, so ratios within a few hundredths of 1 are not differences.
 
 - [`doc/BENCHMARKS.md`](doc/BENCHMARKS.md): every case, the flags on both
   sides, the biases and the command.

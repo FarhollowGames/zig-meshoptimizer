@@ -1647,7 +1647,9 @@ const AttributeError = struct {
     attribute_count: usize,
     clamped: bool,
 
-    fn of(self: AttributeError, from: u32, to: u32) f32 {
+    // Inlined into the ranking loop, as the original's compiler inlines its
+    // quadricError there; called, it reloads its fields on every call.
+    inline fn of(self: AttributeError, from: u32, to: u32) f32 {
         const n = self.attribute_count;
         return quadricErrorAttributes(
             self.attribute_quadrics[from],

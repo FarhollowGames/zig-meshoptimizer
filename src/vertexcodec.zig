@@ -850,6 +850,10 @@ fn decode(
 
     const vertex_block_size = getVertexBlockSize(vertex_size);
 
+    // A destination larger than the caches near the core is fetched for
+    // writing a block ahead of its deltas; a smaller one is likely there.
+    const prefetch = destination.len > 1 << 20;
+
     var pos: usize = 1;
     var vertex_offset: usize = 0;
 
@@ -879,6 +883,7 @@ fn decode(
                 &last_vertex,
                 channels,
                 version,
+                prefetch,
             ),
         };
         pos = end orelse return error.InvalidData;
@@ -1681,6 +1686,7 @@ fn decodeVertexBlockSimd(
     last_vertex: *[256]u8,
     channels: []const u8,
     version: VertexVersion,
+    prefetch: bool,
 ) ?usize {
     const vertex_count = vertex_data.len / vertex_size;
     assert(vertex_count > 0 and vertex_count <= vertex_block_max_size);
@@ -1689,6 +1695,24 @@ fn decodeVertexBlockSimd(
     var transposed: [vertex_block_size_bytes]u8 = undefined;
 
     const vertex_count_aligned = std.mem.alignForward(usize, vertex_count, byte_group_size);
+
+    // The deltas are written for whole groups of vertices. When the block
+    // has no part group, as all but the last do, they go straight to
+    // `vertex_data`, which the original fills by copying the block after
+    // decoding it; only after an error, when the output is unspecified,
+    // does that leave other bytes there.
+    const direct = vertex_count == vertex_count_aligned;
+    const full = vertex_count_aligned == vertex_block_max_size;
+
+    // The deltas land 4 bytes at a time across the block's lines; fetching
+    // the lines for writing first, while the byte groups decode, keeps those
+    // stores from waiting on memory one line at a time.
+    if (direct and prefetch) {
+        var line: usize = 0;
+        while (line < vertex_data.len) : (line += 64) {
+            @prefetch(vertex_data.ptr + line, .{ .rw = .write });
+        }
+    }
 
     const control_size = if (version == .v0) 0 else vertex_size / 4;
     if (data.len - start < control_size) return null;
@@ -1711,12 +1735,22 @@ fn decodeVertexBlockSimd(
                     // safe, as the tail follows.
                     if (data.len - pos < vertex_count_aligned) return null;
 
-                    @memcpy(lane, data[pos..][0..vertex_count_aligned]);
+                    // A full block's lane has a known size, so LLVM copies
+                    // it with a few vector moves instead of calling memcpy.
+                    if (full) {
+                        lane[0..vertex_block_max_size].* = data[pos..][0..vertex_block_max_size].*;
+                    } else {
+                        @memcpy(lane, data[pos..][0..vertex_count_aligned]);
+                    }
                     pos += vertex_count;
                 },
                 2 => {
                     // Zero encoding.
-                    @memset(lane, 0);
+                    if (full) {
+                        lane[0..vertex_block_max_size].* = @splat(0);
+                    } else {
+                        @memset(lane, 0);
+                    }
                 },
                 else => {
                     // Version 0's headers map to 0 to 3, version 1's to 4 to 8.
@@ -1728,7 +1762,7 @@ fn decodeVertexBlockSimd(
         }
 
         const channel = if (version == .v0) 0 else channels[k / 4];
-        const target = transposed[k..];
+        const target = if (direct) vertex_data[k..] else transposed[k..];
         const last = last_vertex[k..][0..4];
 
         switch (channel & 3) {
@@ -1743,10 +1777,11 @@ fn decodeVertexBlockSimd(
         }
     }
 
-    @memcpy(vertex_data, transposed[0 .. vertex_count * vertex_size]);
+    const decoded = if (direct) vertex_data else transposed[0 .. vertex_count * vertex_size];
+    if (!direct) @memcpy(vertex_data, decoded);
 
     const last_offset = vertex_size * (vertex_count - 1);
-    @memcpy(last_vertex[0..vertex_size], transposed[last_offset..][0..vertex_size]);
+    @memcpy(last_vertex[0..vertex_size], decoded[last_offset..][0..vertex_size]);
 
     return pos;
 }
@@ -1845,6 +1880,36 @@ test "the NEON decoder counts sixteen sentinels in 2- and 4-bit groups as zero" 
             const want_end = if (decoder == .neon) scalar_end - 16 else scalar_end;
             try testing.expectEqual(want_end, end);
             try testing.expectEqualSlices(u8, &want, &out);
+        }
+    }
+}
+
+test "every decoder round-trips a buffer past the prefetch size" {
+    // Over 1 MB, so whole blocks decode straight into the destination with
+    // their lines prefetched, and a count that leaves a part block at the
+    // end, which goes through the block buffer. Vertices up to 32 bytes
+    // fill a block with 256 vertices; 48- and 64-byte ones with fewer.
+    var prng: std.Random.DefaultPrng = .init(11);
+    const rng = prng.random();
+    for ([_]usize{ 12, 16, 32, 48, 64 }) |vertex_size| {
+        const count = (1 << 20) / vertex_size + 1000 + 7;
+        const vertices = try testing.allocator.alloc(u8, count * vertex_size);
+        defer testing.allocator.free(vertices);
+        const encoded = try testing.allocator.alloc(u8, encodeVertexBufferBound(count, vertex_size));
+        defer testing.allocator.free(encoded);
+        const decoded = try testing.allocator.alloc(u8, vertices.len);
+        defer testing.allocator.free(decoded);
+
+        // Smooth values with some noise, so groups take every bit count.
+        for (vertices, 0..) |*b, i| b.* = @truncate(i / vertex_size / 64 + (rng.int(u8) >> 5));
+        for ([_]VertexVersion{ .v0, .v1 }) |version| {
+            const size = encodeVertexBufferLevel(encoded, vertices, vertex_size, 2, version);
+            try testing.expect(size > 0);
+            inline for (testable_decoders) |decoder| {
+                @memset(decoded, 0x55);
+                try decodeVertexBufferWith(decoder, decoded, vertex_size, encoded[0..size]);
+                try testing.expectEqualSlices(u8, vertices, decoded);
+            }
         }
     }
 }

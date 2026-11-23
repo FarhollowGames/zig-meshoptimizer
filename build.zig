@@ -108,6 +108,14 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&b.addRunArtifact(suite).step);
 
     // The benchmark always runs in ReleaseFast, against the original at -O3.
+    const bench_runs = b.option(
+        u32,
+        "bench-runs",
+        "Timed calls of each side per benchmark case (default 11)",
+    ) orelse 11;
+    if (bench_runs == 0) @panic("-Dbench-runs needs at least 1");
+    const bench_options = b.addOptions();
+    bench_options.addOption(u32, "runs", bench_runs);
     const bench = b.addExecutable(.{
         .name = "bench",
         .root_module = b.createModule(.{
@@ -123,6 +131,7 @@ pub fn build(b: *std.Build) void {
                 }) },
                 .{ .name = "upstream", .module = upstream_mod },
                 .{ .name = "meshes", .module = demoMeshes(b, upstream, target, .fast) },
+                .{ .name = "bench_options", .module = bench_options.createModule() },
             },
         }),
     });
