@@ -7,14 +7,15 @@ are not a verdict on either side.
 one function at a time, on one thread, and prints a row per case: each
 side's median time and spread, the port's time over the original's, and a
 throughput where a case says how much one call processes. `zig build bench
--- <text>` runs only the cases whose name holds the text.
+-- <text>` runs only the cases whose name holds the text, and `zig build
+bench -Dbench-runs=<n>` times `n` calls of each side instead of 11.
 
 The table below combines three runs of the benchmark binary, pinned to one
 core:
 
 ```sh
 zig build bench -- no-such-case      # builds the binary, runs nothing
-taskset -c 5 ./.zig-cache/o/<hash>/bench
+taskset -c 3 ./.zig-cache/o/<hash>/bench
 ```
 
 The binary finds the original's shared library through its run path,
@@ -22,14 +23,20 @@ relative to the repository's root, so it runs from there.
 
 ## Machine and flags
 
-Measured on 11 November 2026 at commit `a57cfbb`, on an AMD Ryzen 9
-9950X3D (16 cores) under Linux 7.3.3 (CachyOS), pinned to CPU 5, one of
-the eight with the stacked cache. The two `optimizeVertexFetch` rows are
-from the next commit, `e45d890`, which changes only that function, in
-three runs of their own.
+Measured on 23 November 2026, on a cloud virtual machine: 4 virtual CPUs
+of an Intel Xeon (Emerald Rapids, 2.1 GHz, AVX-512) under KVM, Linux
+6.18.44, Ubuntu 24.04's glibc 2.39, pinned to CPU 3. The "before" column is
+commit `a28aebf` (version 0.1.3), the table's times are commit `7c29101`;
+the two binaries ran in turns, three runs each, on the same machine.
+
+This is a different machine from the one the first performance pass was
+measured on (an AMD Ryzen 9 9950X3D; its table is in this file's history,
+at `a28aebf`). Some rows differ a lot between the two: `unstripify` was
+1.35 and 0.82 there and 2.00 and 2.53 here before this pass, and
+`encodeFilter quat` 0.60 there and 1.61 here.
 
 - **The port:** Zig 0.17.0, ReleaseFast, for the machine's own CPU
-  (`znver5`).
+  (`emeraldrapids`).
 - **The original:** meshoptimizer 1.3 (`f0a684f`), built from source by
   the clang that Zig 0.17.0 carries (22.1.8), for the same CPU, at `-O3
   -std=c++11 -ffp-contract=off -fno-fast-math -fno-exceptions -fno-rtti`,
@@ -54,10 +61,11 @@ three runs of their own.
   specialize the port on the benchmark's sizes and options, which it
   cannot do for the original's separately built library either. Every
   result and output stays observable, so no work is dropped.
-- The benchmark ran three times. Each row's time is the median of the
-  three runs' medians, and its ratio is the port's time over the
-  original's: below 1, the port takes less time. The range is the lowest
-  and highest ratio of the three runs.
+- The benchmark ran three times for each commit. Each row's time is the
+  median of the three runs' medians, and its ratio the median of the three
+  runs' ratios, the port's time over the original's: below 1, the port
+  takes less time. The range is the lowest and highest ratio of the three
+  runs at `7c29101`. "Before" is the median ratio at `a28aebf`.
 
 ## Known biases
 
@@ -73,9 +81,12 @@ three runs of their own.
   where the original's loops vectorize; loops the original relies on
   clang to vectorize and the port does not yet are among the slower rows
   below.
-- **The machine was not idle.** Other builds ran on the other half of the
-  processor during the runs; the benchmark ran on a core of the half with
-  the stacked cache.
+- **A shared virtual machine.** The runs were on 4 virtual CPUs of a
+  cloud machine, with nothing else running in it, but its host's other
+  tenants are not under control: a side's spread within a case is often
+  10 to 30% of its median. Taking turns and taking the median of three runs
+  keeps the ratios steadier than the times (their ranges are given), but a
+  ratio within a few hundredths of 1 is not a difference.
 
 ## Results
 
@@ -87,259 +98,317 @@ normal and texture coordinates. Cases with `u16` in their name take
 16-bit indices, against the original's 16-bit templates.
 
 Over all 218 cases, the port's time is at most 1.05 of the original's in
-192, and below the original's in 140.
+198 (164 before this pass, on this machine), and below the original's in
+133 (117 before).
 
-| case | original µs | port µs | port ÷ original | range |
-| --- | ---: | ---: | ---: | ---: |
-| quantizeHalf 1M | 990.3 | 708.8 | 0.72 | 0.53 to 0.72 |
-| dequantizeHalf 1M | 1,184 | 568.1 | 0.48 | 0.44 to 0.48 |
-| quantizeFloat 1M | 1,583 | 426.8 | 0.27 | 0.27 to 0.31 |
-| quantizeUnorm 1M | 70.2 | 340.4 | 4.85 | 4.39 to 6.14 |
-| quantizeSnorm 1M | 77.3 | 396.1 | 5.12 | 5.10 to 6.68 |
-| quantizeUnorm x16 1M | 74.2 | 74.3 | 1.00 | 1.00 to 1.00 |
-| quantizeSnorm x16 1M | 78.0 | 78.2 | 1.00 | 0.99 to 1.02 |
-| computePositionExponent 1M | 13,490 | 10,687 | 0.79 | 0.76 to 0.79 |
-| generateVertexRemap pirate | 113.6 | 105.0 | 0.92 | 0.92 to 0.96 |
-| generateVertexRemapMulti pirate | 177.0 | 188.9 | 1.07 | 1.07 to 1.08 |
-| generateVertexRemapCustom pirate | 29.6 | 23.0 | 0.78 | 0.72 to 0.78 |
-| remapVertexBuffer pirate | 18.5 | 15.3 | 0.83 | 0.79 to 0.96 |
-| remapIndexBuffer pirate | 0.6 | 0.5 | 0.83 | 0.83 to 1.00 |
-| generateShadowIndexBuffer pirate | 13.7 | 13.5 | 0.99 | 0.99 to 1.13 |
-| generateShadowIndexBufferMulti pirate | 21.6 | 15.5 | 0.72 | 0.68 to 0.73 |
-| filterIndexBuffer pirate | 70.9 | 67.8 | 0.96 | 0.96 to 1.00 |
-| filterIndexBufferMulti pirate | 51.4 | 51.1 | 0.99 | 0.99 to 1.05 |
-| generateProvokingIndexBuffer pirate | 16.5 | 15.9 | 0.96 | 0.95 to 0.99 |
-| generateVertexRemap sphere 1M | 24,457 | 23,333 | 0.95 | 0.95 to 1.06 |
-| generateVertexRemapMulti sphere 1M | 35,055 | 38,298 | 1.09 | 1.09 to 1.11 |
-| generateVertexRemapCustom sphere 1M | 9,285 | 8,052 | 0.87 | 0.86 to 0.87 |
-| remapVertexBuffer sphere 1M | 4,974 | 4,665 | 0.94 | 0.93 to 0.94 |
-| remapIndexBuffer sphere 1M | 154.6 | 154.6 | 1.00 | 0.99 to 1.00 |
-| generateShadowIndexBuffer sphere 1M | 3,186 | 3,050 | 0.96 | 0.95 to 0.96 |
-| generateShadowIndexBufferMulti sphere 1M | 3,864 | 3,276 | 0.85 | 0.84 to 0.87 |
-| filterIndexBuffer sphere 1M | 9,323 | 10,534 | 1.13 | 1.13 to 1.15 |
-| filterIndexBufferMulti sphere 1M | 10,001 | 10,850 | 1.08 | 1.08 to 1.09 |
-| generateProvokingIndexBuffer sphere 1M | 2,775 | 2,502 | 0.90 | 0.85 to 0.98 |
-| optimizeOverdraw pirate | 66.0 | 64.7 | 0.98 | 0.98 to 0.99 |
-| optimizeVertexFetch pirate | 7.0 | 5.6 | 0.80 | 0.78 to 0.80 |
-| stripify pirate | 110.5 | 104.5 | 0.95 | 0.91 to 0.97 |
-| spatialSortTriangles pirate | 41.2 | 35.5 | 0.86 | 0.86 to 0.86 |
-| spatialClusterPoints pirate | 36.3 | 33.3 | 0.92 | 0.91 to 0.92 |
-| spatialSortRemap pirate | 20.7 | 18.5 | 0.89 | 0.89 to 0.89 |
-| analyzeVertexCache pirate | 7.4 | 7.5 | 1.01 | 1.00 to 1.01 |
-| analyzeVertexFetch pirate | 14.2 | 16.6 | 1.17 | 1.11 to 1.17 |
-| analyzeOverdraw pirate | 824.4 | 811.7 | 0.98 | 0.96 to 0.99 |
-| analyzeCoverage pirate | 820.4 | 803.1 | 0.98 | 0.97 to 0.98 |
-| optimizeVertexFetchRemap pirate | 3.7 | 3.1 | 0.84 | 0.83 to 0.85 |
-| unstripify pirate | 4.6 | 6.2 | 1.35 | 1.31 to 1.36 |
-| generatePositionRemap pirate | 5.9 | 5.1 | 0.86 | 0.85 to 0.91 |
-| generateAdjacencyIndexBuffer pirate | 173.8 | 172.2 | 0.99 | 0.99 to 1.00 |
-| generateTessellationIndexBuffer pirate | 171.5 | 167.6 | 0.98 | 0.97 to 0.99 |
-| optimizeOverdraw sphere 1M | 5,375 | 5,303 | 0.99 | 0.98 to 0.99 |
-| optimizeVertexFetch sphere 1M | 1,537 | 1,462 | 0.95 | 0.76 to 0.95 |
-| stripify sphere 1M | 14,338 | 12,138 | 0.85 | 0.71 to 0.88 |
-| spatialSortTriangles sphere 1M | 10,377 | 9,026 | 0.87 | 0.87 to 0.89 |
-| spatialClusterPoints sphere 1M | 11,802 | 11,137 | 0.94 | 0.94 to 0.95 |
-| spatialSortRemap sphere 1M | 3,439 | 3,084 | 0.90 | 0.89 to 0.90 |
-| analyzeVertexCache sphere 1M | 1,645 | 1,576 | 0.96 | 0.91 to 0.96 |
-| analyzeVertexFetch sphere 1M | 3,115 | 3,368 | 1.08 | 1.08 to 1.08 |
-| analyzeOverdraw sphere 1M | 27,234 | 26,787 | 0.98 | 0.84 to 0.99 |
-| analyzeCoverage sphere 1M | 27,269 | 27,118 | 0.99 | 0.98 to 1.00 |
-| optimizeVertexFetchRemap sphere 1M | 632.5 | 537.4 | 0.85 | 0.83 to 0.89 |
-| unstripify sphere 1M | 1,399 | 1,144 | 0.82 | 0.82 to 0.90 |
-| generatePositionRemap sphere 1M | 3,162 | 3,180 | 1.01 | 1.01 to 1.02 |
-| generateAdjacencyIndexBuffer sphere 1M | 75,376 | 76,254 | 1.01 | 1.00 to 1.01 |
-| generateTessellationIndexBuffer sphere 1M | 74,363 | 73,280 | 0.99 | 0.98 to 0.99 |
-| optimizeVertexCache pirate | 450.8 | 436.9 | 0.97 | 0.96 to 0.98 |
-| optimizeVertexCacheStrip pirate | 422.3 | 404.8 | 0.96 | 0.95 to 0.96 |
-| optimizeVertexCacheFifo pirate | 92.8 | 93.5 | 1.01 | 1.00 to 1.01 |
-| buildMeshlets pirate | 1,316 | 1,128 | 0.86 | 0.86 to 0.86 |
-| buildMeshletsScan pirate | 10.3 | 7.9 | 0.77 | 0.77 to 0.78 |
-| buildMeshletsFlex pirate | 1,301 | 1,117 | 0.86 | 0.86 to 0.86 |
-| buildMeshletsSpatial pirate | 474.8 | 487.6 | 1.03 | 1.03 to 1.04 |
-| optimizeMeshlet pirate | 80.7 | 84.2 | 1.04 | 1.04 to 1.09 |
-| optimizeMeshletLevel 3 pirate | 464.4 | 443.0 | 0.95 | 0.95 to 0.96 |
-| computeMeshletBounds pirate | 61.2 | 46.6 | 0.76 | 0.76 to 0.76 |
-| computeClusterBounds pirate | 65.3 | 49.3 | 0.75 | 0.75 to 0.76 |
-| extractMeshletIndices pirate | 7.0 | 6.2 | 0.89 | 0.72 to 0.91 |
-| computeSphereBounds points pirate | 11.1 | 6.3 | 0.57 | 0.57 to 0.57 |
-| computeSphereBounds spheres pirate | 11.1 | 6.4 | 0.58 | 0.57 to 0.58 |
-| partitionClusters pirate | 20.0 | 20.2 | 1.01 | 1.01 to 1.02 |
-| optimizeVertexCache sphere 1M | 41,158 | 40,908 | 0.99 | 0.98 to 0.99 |
-| optimizeVertexCacheStrip sphere 1M | 53,902 | 48,894 | 0.91 | 0.90 to 0.92 |
-| optimizeVertexCacheFifo sphere 1M | 10,276 | 9,053 | 0.88 | 0.88 to 0.95 |
-| buildMeshlets sphere 1M | 345,719 | 267,152 | 0.77 | 0.77 to 0.78 |
-| buildMeshletsScan sphere 1M | 2,186 | 1,776 | 0.81 | 0.81 to 0.84 |
-| buildMeshletsFlex sphere 1M | 345,361 | 265,650 | 0.77 | 0.77 to 0.79 |
-| buildMeshletsSpatial sphere 1M | 199,562 | 217,058 | 1.09 | 1.04 to 1.09 |
-| optimizeMeshlet sphere 1M | 19,098 | 20,568 | 1.08 | 1.07 to 1.09 |
-| optimizeMeshletLevel 3 sphere 1M | 97,614 | 94,993 | 0.97 | 0.95 to 0.98 |
-| computeMeshletBounds sphere 1M | 13,294 | 12,668 | 0.95 | 0.95 to 0.95 |
-| computeClusterBounds sphere 1M | 19,329 | 14,127 | 0.73 | 0.73 to 0.74 |
-| extractMeshletIndices sphere 1M | 29,373 | 21,026 | 0.72 | 0.71 to 0.72 |
-| computeSphereBounds points sphere 1M | 1,838 | 1,046 | 0.57 | 0.57 to 0.57 |
-| computeSphereBounds spheres sphere 1M | 1,855 | 1,076 | 0.58 | 0.58 to 0.58 |
-| partitionClusters sphere 1M | 7,622 | 8,100 | 1.06 | 1.06 to 1.09 |
-| optimizeVertexCache u16 pirate | 460.1 | 441.7 | 0.96 | 0.96 to 0.96 |
-| simplify u16 pirate | 751.3 | 748.7 | 1.00 | 0.96 to 1.00 |
-| buildMeshlets u16 pirate | 1,304 | 1,092 | 0.84 | 0.84 to 0.87 |
-| encodeIndexBuffer pirate | 3,184 | 3,177 | 1.00 | 0.99 to 1.00 |
-| decodeIndexBuffer u32 pirate | 836.6 | 753.9 | 0.90 | 0.90 to 0.91 |
-| decodeIndexBuffer u16 pirate | 832.6 | 746.4 | 0.90 | 0.90 to 0.90 |
-| encodeIndexSequence pirate | 2,031 | 2,174 | 1.07 | 1.07 to 1.09 |
-| decodeIndexSequence pirate | 1,371 | 1,058 | 0.77 | 0.77 to 0.79 |
-| encodeMeshlet pirate | 1,409 | 1,384 | 0.98 | 0.97 to 1.05 |
-| decodeMeshlet u32/u8 pirate | 313.7 | 304.0 | 0.97 | 0.97 to 1.01 |
-| decodeMeshlet u16/u32 pirate | 317.3 | 306.2 | 0.97 | 0.94 to 0.99 |
-| decodeMeshletRaw pirate | 299.2 | 320.8 | 1.07 | 1.01 to 1.07 |
-| encodeIndexBuffer sphere 1M | 7,330 | 7,193 | 0.98 | 0.98 to 0.99 |
-| decodeIndexBuffer u32 sphere 1M | 1,667 | 1,535 | 0.92 | 0.82 to 0.92 |
-| decodeIndexBuffer u16 sphere 1M | 1,666 | 1,529 | 0.92 | 0.92 to 1.04 |
-| encodeIndexSequence sphere 1M | 4,296 | 4,363 | 1.02 | 1.00 to 1.02 |
-| decodeIndexSequence sphere 1M | 4,078 | 2,132 | 0.52 | 0.52 to 0.52 |
-| encodeMeshlet sphere 1M | 4,039 | 4,110 | 1.02 | 0.98 to 1.02 |
-| decodeMeshlet u32/u8 sphere 1M | 658.0 | 638.6 | 0.97 | 0.97 to 1.00 |
-| decodeMeshlet u16/u32 sphere 1M | 667.9 | 639.4 | 0.96 | 0.95 to 0.97 |
-| decodeMeshletRaw sphere 1M | 622.5 | 660.0 | 1.06 | 1.02 to 1.07 |
-| simplify pirate | 804.3 | 811.0 | 1.01 | 0.99 to 1.01 |
-| simplifyWithAttributes pirate | 1,098 | 1,180 | 1.08 | 1.08 to 1.10 |
-| simplifyWithUpdate pirate | 1,163 | 1,237 | 1.06 | 1.04 to 1.07 |
-| simplifySloppy pirate | 63.0 | 62.9 | 1.00 | 0.99 to 1.01 |
-| simplifyPrune pirate | 80.0 | 73.0 | 0.91 | 0.91 to 1.00 |
-| simplifyPoints pirate | 32.4 | 29.6 | 0.91 | 0.89 to 0.92 |
-| simplify sphere 1M | 208,835 | 223,636 | 1.07 | 0.99 to 1.12 |
-| simplifyWithAttributes sphere 1M | 378,362 | 414,720 | 1.10 | 1.03 to 1.10 |
-| simplifyWithUpdate sphere 1M | 361,854 | 376,336 | 1.04 | 1.04 to 1.10 |
-| simplifySloppy sphere 1M | 18,800 | 18,389 | 0.98 | 0.98 to 0.98 |
-| simplifyPrune sphere 1M | 11,680 | 10,742 | 0.92 | 0.92 to 0.93 |
-| simplifyPoints sphere 1M | 9,794 | 9,718 | 0.99 | 0.99 to 0.99 |
-| simplify pirate, allocator cache | 821.8 | 829.7 | 1.01 | 1.01 to 1.01 |
-| clusterlod build default(128) pirate | 5,365 | 5,156 | 0.96 | 0.96 to 0.96 |
-| clusterlod build defaultRT(128) pirate | 3,520 | 3,588 | 1.02 | 1.02 to 1.02 |
-| clusterlod build default(128) sphere 262k | 274,194 | 251,758 | 0.92 | 0.91 to 0.92 |
-| clusterlod build defaultRT(128) sphere 262k | 150,750 | 157,979 | 1.05 | 1.05 to 1.05 |
-| clusterlod buildHierarchy sphere 262k | 1,408 | 1,184 | 0.84 | 0.83 to 0.84 |
-| encodeVertexBuffer v1 L0 pirate | 67.6 | 70.3 | 1.04 | 1.04 to 1.04 |
-| decodeVertexBuffer v1 L0 pirate | 14.4 | 15.0 | 1.04 | 1.03 to 1.04 |
-| encodeVertexBuffer v1 L1 pirate | 60.4 | 57.1 | 0.95 | 0.95 to 0.95 |
-| decodeVertexBuffer v1 L1 pirate | 13.8 | 14.4 | 1.04 | 1.04 to 1.04 |
-| encodeVertexBuffer v1 L2 pirate | 67.7 | 68.5 | 1.01 | 1.01 to 1.02 |
-| decodeVertexBuffer v1 L2 pirate | 13.7 | 14.3 | 1.04 | 1.04 to 1.05 |
-| encodeVertexBuffer v1 L3 pirate | 93.8 | 93.9 | 1.00 | 0.99 to 1.00 |
-| decodeVertexBuffer v1 L3 pirate | 13.8 | 14.3 | 1.04 | 1.04 to 1.04 |
-| encodeVertexBuffer v0 pirate | 64.1 | 64.7 | 1.01 | 1.00 to 1.02 |
-| decodeVertexBuffer v0 pirate | 14.1 | 14.5 | 1.03 | 1.03 to 1.04 |
-| encodeVertexBuffer v1 L0 pirate q16 | 33.9 | 33.0 | 0.97 | 0.97 to 0.98 |
-| decodeVertexBuffer v1 L0 pirate q16 | 7.4 | 7.7 | 1.04 | 1.03 to 1.04 |
-| encodeVertexBuffer v1 L1 pirate q16 | 31.7 | 28.8 | 0.91 | 0.91 to 0.91 |
-| decodeVertexBuffer v1 L1 pirate q16 | 7.2 | 7.5 | 1.04 | 1.04 to 1.04 |
-| encodeVertexBuffer v1 L2 pirate q16 | 36.7 | 35.5 | 0.97 | 0.97 to 0.98 |
-| decodeVertexBuffer v1 L2 pirate q16 | 7.2 | 7.5 | 1.04 | 1.04 to 1.06 |
-| encodeVertexBuffer v1 L3 pirate q16 | 49.0 | 47.4 | 0.97 | 0.96 to 0.97 |
-| decodeVertexBuffer v1 L3 pirate q16 | 7.2 | 7.5 | 1.04 | 1.04 to 1.06 |
-| encodeVertexBuffer v0 pirate q16 | 35.2 | 36.9 | 1.05 | 1.03 to 1.05 |
-| decodeVertexBuffer v0 pirate q16 | 7.4 | 7.7 | 1.04 | 1.04 to 1.04 |
-| encodeVertexBuffer v1 L0 sphere 1M | 20,510 | 18,958 | 0.92 | 0.92 to 0.93 |
-| decodeVertexBuffer v1 L0 sphere 1M | 4,510 | 4,692 | 1.04 | 1.04 to 1.04 |
-| encodeVertexBuffer v1 L1 sphere 1M | 17,322 | 14,779 | 0.85 | 0.85 to 0.85 |
-| decodeVertexBuffer v1 L1 sphere 1M | 4,100 | 4,272 | 1.04 | 1.04 to 1.05 |
-| encodeVertexBuffer v1 L2 sphere 1M | 18,304 | 17,105 | 0.93 | 0.93 to 0.93 |
-| decodeVertexBuffer v1 L2 sphere 1M | 3,898 | 4,007 | 1.03 | 1.03 to 1.03 |
-| encodeVertexBuffer v1 L3 sphere 1M | 27,163 | 26,155 | 0.96 | 0.95 to 0.96 |
-| decodeVertexBuffer v1 L3 sphere 1M | 3,895 | 4,003 | 1.03 | 1.02 to 1.04 |
-| encodeVertexBuffer v0 sphere 1M | 19,239 | 21,194 | 1.10 | 1.10 to 1.11 |
-| decodeVertexBuffer v0 sphere 1M | 4,272 | 4,366 | 1.02 | 1.01 to 1.03 |
-| encodeVertexBuffer v1 L0 sphere 1M q16 | 9,946 | 9,022 | 0.91 | 0.91 to 0.91 |
-| decodeVertexBuffer v1 L0 sphere 1M q16 | 2,216 | 2,314 | 1.04 | 1.04 to 1.05 |
-| encodeVertexBuffer v1 L1 sphere 1M q16 | 9,597 | 8,336 | 0.87 | 0.87 to 0.87 |
-| decodeVertexBuffer v1 L1 sphere 1M q16 | 2,151 | 2,248 | 1.05 | 1.04 to 1.05 |
-| encodeVertexBuffer v1 L2 sphere 1M q16 | 9,512 | 8,806 | 0.93 | 0.92 to 0.93 |
-| decodeVertexBuffer v1 L2 sphere 1M q16 | 1,930 | 1,995 | 1.03 | 1.03 to 1.03 |
-| encodeVertexBuffer v1 L3 sphere 1M q16 | 14,373 | 13,701 | 0.95 | 0.95 to 0.95 |
-| decodeVertexBuffer v1 L3 sphere 1M q16 | 1,928 | 1,994 | 1.03 | 1.03 to 1.03 |
-| encodeVertexBuffer v0 sphere 1M q16 | 10,343 | 9,849 | 0.95 | 0.95 to 0.97 |
-| decodeVertexBuffer v0 sphere 1M q16 | 2,234 | 2,328 | 1.04 | 1.04 to 1.05 |
-| encodeFilter oct 8-bit | 6,802 | 6,730 | 0.99 | 0.99 to 0.99 |
-| decodeFilter oct 8-bit | 2,284 | 648.7 | 0.28 | 0.28 to 0.28 |
-| encodeFilter oct 16-bit | 6,415 | 6,409 | 1.00 | 1.00 to 1.00 |
-| decodeFilter oct 16-bit | 2,875 | 698.6 | 0.24 | 0.24 to 0.24 |
-| encodeFilter quat | 8,174 | 4,874 | 0.60 | 0.59 to 0.60 |
-| decodeFilter quat | 1,983 | 935.4 | 0.47 | 0.47 to 0.47 |
-| encodeFilter exp separate | 15,414 | 9,240 | 0.60 | 0.60 to 0.60 |
-| decodeFilter exp separate | 928.5 | 457.3 | 0.49 | 0.45 to 0.53 |
-| encodeFilter exp shared_vector | 11,747 | 6,688 | 0.57 | 0.57 to 0.57 |
-| encodeFilter exp shared_component | 14,966 | 4,520 | 0.30 | 0.30 to 0.31 |
-| encodeFilter exp clamped | 12,598 | 7,271 | 0.58 | 0.58 to 0.58 |
-| encodeFilter color 8-bit | 6,124 | 5,573 | 0.91 | 0.91 to 0.91 |
-| decodeFilter color 8-bit | 2,045 | 577.7 | 0.28 | 0.28 to 0.28 |
-| encodeFilter color 16-bit | 6,129 | 5,581 | 0.91 | 0.91 to 0.92 |
-| decodeFilter color 16-bit | 2,376 | 622.7 | 0.26 | 0.26 to 0.26 |
-| remesh 64 pirate | 590.6 | 613.0 | 1.04 | 1.03 to 1.04 |
-| remesh 64 shell pirate | 539.2 | 525.9 | 0.98 | 0.98 to 0.98 |
-| remesh 64 solve pirate | 682.1 | 725.0 | 1.06 | 1.06 to 1.07 |
-| remesh 128 pirate | 2,187 | 2,316 | 1.06 | 1.06 to 1.06 |
-| remesh 128 shell pirate | 1,896 | 1,924 | 1.01 | 1.01 to 1.02 |
-| remesh 128 solve pirate | 2,544 | 2,766 | 1.09 | 1.09 to 1.09 |
-| remesh 256 pirate | 11,018 | 11,428 | 1.04 | 1.04 to 1.05 |
-| remesh 256 shell pirate | 8,673 | 9,046 | 1.04 | 1.04 to 1.04 |
-| remesh 256 solve pirate | 13,266 | 14,199 | 1.07 | 1.07 to 1.07 |
-| remesh 64 sphere 1M | 32,075 | 28,538 | 0.89 | 0.89 to 0.89 |
-| remesh 64 shell sphere 1M | 31,808 | 27,994 | 0.88 | 0.88 to 0.88 |
-| remesh 64 solve sphere 1M | 34,622 | 32,334 | 0.93 | 0.93 to 0.94 |
-| remesh 128 sphere 1M | 35,331 | 32,169 | 0.91 | 0.91 to 0.91 |
-| remesh 128 shell sphere 1M | 34,177 | 30,706 | 0.90 | 0.90 to 0.90 |
-| remesh 128 solve sphere 1M | 38,973 | 37,205 | 0.95 | 0.95 to 0.96 |
-| remesh 256 sphere 1M | 78,819 | 75,557 | 0.96 | 0.96 to 0.97 |
-| remesh 256 shell sphere 1M | 67,982 | 65,559 | 0.96 | 0.96 to 0.97 |
-| remesh 256 solve sphere 1M | 84,604 | 83,054 | 0.98 | 0.97 to 0.99 |
-| generateTangents pirate | 340.5 | 338.4 | 0.99 | 0.98 to 0.99 |
-| generateTangents compatible pirate | 336.5 | 333.2 | 0.99 | 0.98 to 0.99 |
-| generateTangents zero fallback pirate | 336.3 | 333.2 | 0.99 | 0.99 to 0.99 |
-| generateNormals pirate | 310.5 | 319.5 | 1.03 | 1.00 to 1.04 |
-| generateNormals smooth 1.5 pirate | 386.9 | 381.8 | 0.99 | 0.97 to 1.00 |
-| generateTangents sphere 1M | 63,983 | 58,030 | 0.91 | 0.88 to 0.93 |
-| generateTangents compatible sphere 1M | 63,022 | 58,455 | 0.93 | 0.88 to 0.93 |
-| generateTangents zero fallback sphere 1M | 64,718 | 58,204 | 0.90 | 0.86 to 0.94 |
-| generateNormals sphere 1M | 47,304 | 45,106 | 0.95 | 0.91 to 0.95 |
-| generateNormals smooth 1.5 sphere 1M | 70,517 | 62,050 | 0.88 | 0.88 to 0.92 |
-| opacityMapMeasure pirate | 64.7 | 54.7 | 0.85 | 0.80 to 0.85 |
-| opacityMapMeasure sphere 1M | 16,590 | 14,294 | 0.86 | 0.81 to 0.86 |
-| opacityMapRasterize 2-state pirate | 3,044 | 3,517 | 1.16 | 1.16 to 1.16 |
-| opacityMapRasterize 2-state level 10 | 44,233 | 40,914 | 0.92 | 0.92 to 0.94 |
-| opacityMapRasterize 2-state level 12 | 706,325 | 653,732 | 0.93 | 0.93 to 0.93 |
-| opacityMapRasterize 4-state pirate | 3,567 | 3,784 | 1.06 | 1.06 to 1.07 |
-| opacityMapRasterize 4-state level 10 | 48,644 | 47,574 | 0.98 | 0.97 to 0.98 |
-| opacityMapRasterize 4-state level 12 | 778,610 | 785,398 | 1.01 | 0.98 to 1.03 |
+| case | before ÷ original | original µs | port µs | port ÷ original | range |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| quantizeHalf 1M | 0.79 | 1,794 | 1,488 | 0.83 | 0.79 to 0.85 |
+| dequantizeHalf 1M | 0.65 | 1,520 | 854.3 | 0.57 | 0.55 to 0.57 |
+| quantizeFloat 1M | 0.24 | 3,066 | 742.7 | 0.24 | 0.23 to 0.30 |
+| quantizeUnorm 1M | 2.78 | 373.4 | 1,002 | 2.68 | 2.66 to 2.88 |
+| quantizeSnorm 1M | 3.00 | 349.0 | 1,032 | 2.96 | 2.88 to 3.00 |
+| quantizeUnorm x16 1M | 1.00 | 354.1 | 373.9 | 1.05 | 0.98 to 1.06 |
+| quantizeSnorm x16 1M | 1.02 | 375.6 | 380.3 | 1.00 | 0.98 to 1.01 |
+| computePositionExponent 1M | 0.72 | 27,416 | 19,972 | 0.73 | 0.72 to 0.73 |
+| generateVertexRemap pirate | 1.02 | 201.7 | 160.6 | 0.80 | 0.79 to 0.81 |
+| generateVertexRemapMulti pirate | 1.06 | 311.1 | 294.4 | 0.96 | 0.94 to 0.96 |
+| generateVertexRemapCustom pirate | 0.79 | 100.6 | 62.1 | 0.62 | 0.62 to 0.63 |
+| remapVertexBuffer pirate | 1.52 | 21.9 | 22.0 | 0.99 | 0.99 to 1.01 |
+| remapIndexBuffer pirate | 1.12 | 1.7 | 1.8 | 1.12 | 1.09 to 1.17 |
+| generateShadowIndexBuffer pirate | 1.23 | 51.2 | 66.4 | 1.31 | 1.24 to 1.32 |
+| generateShadowIndexBufferMulti pirate | 0.94 | 69.1 | 63.9 | 0.92 | 0.90 to 0.95 |
+| filterIndexBuffer pirate | 1.07 | 163.3 | 161.5 | 0.98 | 0.95 to 1.05 |
+| filterIndexBufferMulti pirate | 0.97 | 162.7 | 161.6 | 1.00 | 0.99 to 1.00 |
+| generateProvokingIndexBuffer pirate | 0.98 | 43.6 | 43.1 | 0.99 | 0.94 to 1.01 |
+| generateVertexRemap sphere 1M | 1.03 | 117,244 | 66,648 | 0.56 | 0.53 to 0.61 |
+| generateVertexRemapMulti sphere 1M | 1.16 | 145,361 | 94,532 | 0.65 | 0.60 to 0.69 |
+| generateVertexRemapCustom sphere 1M | 1.02 | 53,788 | 38,653 | 0.73 | 0.69 to 0.73 |
+| remapVertexBuffer sphere 1M | 1.19 | 15,118 | 14,748 | 0.98 | 0.97 to 0.98 |
+| remapIndexBuffer sphere 1M | 0.97 | 1,083 | 1,073 | 0.99 | 0.99 to 1.04 |
+| generateShadowIndexBuffer sphere 1M | 1.16 | 14,852 | 17,252 | 1.15 | 1.04 to 1.16 |
+| generateShadowIndexBufferMulti sphere 1M | 1.03 | 14,200 | 15,036 | 1.06 | 1.04 to 1.08 |
+| filterIndexBuffer sphere 1M | 1.08 | 73,075 | 66,789 | 0.92 | 0.89 to 0.94 |
+| filterIndexBufferMulti sphere 1M | 1.07 | 67,960 | 62,294 | 0.94 | 0.91 to 0.95 |
+| generateProvokingIndexBuffer sphere 1M | 1.04 | 7,422 | 7,725 | 1.04 | 1.02 to 1.04 |
+| optimizeOverdraw pirate | 1.06 | 131.1 | 139.5 | 1.08 | 1.06 to 1.10 |
+| optimizeVertexFetch pirate | 0.51 | 41.2 | 35.6 | 0.87 | 0.86 to 0.90 |
+| stripify pirate | 1.05 | 194.1 | 203.1 | 1.05 | 1.00 to 1.08 |
+| spatialSortTriangles pirate | 0.91 | 78.1 | 68.2 | 0.92 | 0.87 to 0.95 |
+| spatialClusterPoints pirate | 0.99 | 61.7 | 63.2 | 1.02 | 1.02 to 1.03 |
+| spatialSortRemap pirate | 0.93 | 35.7 | 32.8 | 0.92 | 0.92 to 0.93 |
+| analyzeVertexCache pirate | 0.97 | 36.1 | 37.1 | 1.00 | 0.92 to 1.03 |
+| analyzeVertexFetch pirate | 1.15 | 22.4 | 25.1 | 1.12 | 0.95 to 1.13 |
+| analyzeOverdraw pirate | 1.05 | 1,505 | 1,561 | 1.03 | 1.02 to 1.04 |
+| analyzeCoverage pirate | 1.04 | 1,476 | 1,536 | 1.02 | 1.01 to 1.04 |
+| optimizeVertexFetchRemap pirate | 0.85 | 21.1 | 15.9 | 0.74 | 0.51 to 0.75 |
+| unstripify pirate | 2.00 | 18.3 | 13.9 | 0.77 | 0.76 to 0.78 |
+| generatePositionRemap pirate | 0.92 | 21.1 | 20.2 | 0.96 | 0.93 to 0.96 |
+| generateAdjacencyIndexBuffer pirate | 1.05 | 310.9 | 318.9 | 1.00 | 0.97 to 1.03 |
+| generateTessellationIndexBuffer pirate | 0.98 | 308.9 | 293.2 | 0.94 | 0.93 to 0.96 |
+| optimizeOverdraw sphere 1M | 1.03 | 20,968 | 21,692 | 1.04 | 1.03 to 1.06 |
+| optimizeVertexFetch sphere 1M | 0.79 | 6,755 | 4,595 | 0.78 | 0.68 to 0.79 |
+| stripify sphere 1M | 0.93 | 28,946 | 26,084 | 0.92 | 0.90 to 0.92 |
+| spatialSortTriangles sphere 1M | 0.87 | 50,009 | 43,634 | 0.87 | 0.86 to 0.89 |
+| spatialClusterPoints sphere 1M | 0.96 | 31,935 | 30,746 | 0.96 | 0.96 to 0.97 |
+| spatialSortRemap sphere 1M | 0.96 | 12,190 | 11,798 | 0.97 | 0.97 to 0.97 |
+| analyzeVertexCache sphere 1M | 0.96 | 3,544 | 3,428 | 0.96 | 0.96 to 0.98 |
+| analyzeVertexFetch sphere 1M | 1.06 | 5,323 | 5,731 | 1.05 | 1.03 to 1.10 |
+| analyzeOverdraw sphere 1M | 0.97 | 90,898 | 90,583 | 1.00 | 0.91 to 1.00 |
+| analyzeCoverage sphere 1M | 0.98 | 98,662 | 96,058 | 0.95 | 0.92 to 0.99 |
+| optimizeVertexFetchRemap sphere 1M | 0.91 | 1,938 | 1,791 | 0.92 | 0.90 to 0.94 |
+| unstripify sphere 1M | 2.53 | 1,658 | 1,179 | 0.68 | 0.67 to 0.71 |
+| generatePositionRemap sphere 1M | 0.99 | 8,211 | 8,332 | 1.01 | 1.00 to 1.02 |
+| generateAdjacencyIndexBuffer sphere 1M | 1.02 | 309,694 | 306,496 | 0.99 | 0.96 to 1.01 |
+| generateTessellationIndexBuffer sphere 1M | 0.95 | 278,147 | 273,206 | 0.96 | 0.96 to 1.01 |
+| optimizeVertexCache pirate | 0.99 | 764.1 | 762.2 | 1.00 | 1.00 to 1.02 |
+| optimizeVertexCacheStrip pirate | 1.02 | 722.3 | 712.4 | 0.99 | 0.98 to 0.99 |
+| optimizeVertexCacheFifo pirate | 1.04 | 189.6 | 190.0 | 1.03 | 1.00 to 1.09 |
+| buildMeshlets pirate | 0.83 | 2,270 | 1,902 | 0.84 | 0.83 to 0.85 |
+| buildMeshletsScan pirate | 0.63 | 40.1 | 23.6 | 0.59 | 0.56 to 0.60 |
+| buildMeshletsFlex pirate | 0.84 | 2,230 | 1,900 | 0.84 | 0.83 to 0.85 |
+| buildMeshletsSpatial pirate | 1.04 | 968.6 | 975.4 | 1.03 | 1.01 to 1.07 |
+| optimizeMeshlet pirate | 1.03 | 143.9 | 142.7 | 1.01 | 0.99 to 1.04 |
+| optimizeMeshletLevel 3 pirate | 1.03 | 709.4 | 729.1 | 1.03 | 1.02 to 1.03 |
+| computeMeshletBounds pirate | 1.10 | 103.3 | 108.5 | 1.05 | 0.99 to 1.07 |
+| computeClusterBounds pirate | 0.82 | 110.9 | 92.0 | 0.83 | 0.83 to 0.84 |
+| extractMeshletIndices pirate | 0.92 | 37.9 | 34.0 | 0.91 | 0.89 to 0.91 |
+| computeSphereBounds points pirate | 0.61 | 21.4 | 13.1 | 0.61 | 0.61 to 0.61 |
+| computeSphereBounds spheres pirate | 0.63 | 21.4 | 13.4 | 0.63 | 0.63 to 0.63 |
+| partitionClusters pirate | 0.85 | 53.8 | 44.7 | 0.87 | 0.80 to 0.87 |
+| optimizeVertexCache sphere 1M | 0.99 | 94,496 | 93,806 | 1.00 | 0.99 to 1.01 |
+| optimizeVertexCacheStrip sphere 1M | 0.86 | 177,748 | 156,886 | 0.89 | 0.87 to 0.90 |
+| optimizeVertexCacheFifo sphere 1M | 0.95 | 31,439 | 29,711 | 0.95 | 0.95 to 0.99 |
+| buildMeshlets sphere 1M | 0.84 | 701,822 | 584,119 | 0.83 | 0.82 to 0.88 |
+| buildMeshletsScan sphere 1M | 0.88 | 5,413 | 4,511 | 0.83 | 0.82 to 0.83 |
+| buildMeshletsFlex sphere 1M | 0.83 | 708,006 | 577,476 | 0.83 | 0.82 to 0.83 |
+| buildMeshletsSpatial sphere 1M | 1.06 | 509,931 | 546,473 | 1.07 | 1.02 to 1.12 |
+| optimizeMeshlet sphere 1M | 0.99 | 31,646 | 32,679 | 1.03 | 1.00 to 1.03 |
+| optimizeMeshletLevel 3 sphere 1M | 1.07 | 158,336 | 162,841 | 1.03 | 1.03 to 1.05 |
+| computeMeshletBounds sphere 1M | 1.03 | 33,251 | 34,021 | 1.02 | 0.95 to 1.05 |
+| computeClusterBounds sphere 1M | 0.91 | 43,283 | 38,681 | 0.89 | 0.89 to 0.90 |
+| extractMeshletIndices sphere 1M | 0.72 | 60,141 | 43,111 | 0.72 | 0.72 to 0.72 |
+| computeSphereBounds points sphere 1M | 0.55 | 5,436 | 3,117 | 0.57 | 0.56 to 0.58 |
+| computeSphereBounds spheres sphere 1M | 0.56 | 5,410 | 3,056 | 0.57 | 0.56 to 0.58 |
+| partitionClusters sphere 1M | 1.04 | 23,952 | 24,984 | 1.04 | 1.04 to 1.06 |
+| optimizeVertexCache u16 pirate | 0.99 | 767.8 | 753.9 | 0.98 | 0.98 to 0.99 |
+| simplify u16 pirate | 1.03 | 1,374 | 1,396 | 1.02 | 0.99 to 1.03 |
+| buildMeshlets u16 pirate | 0.86 | 2,207 | 1,859 | 0.84 | 0.84 to 0.87 |
+| encodeIndexBuffer pirate | 0.95 | 7,894 | 7,897 | 1.00 | 0.98 to 1.03 |
+| decodeIndexBuffer u32 pirate | 0.94 | 1,271 | 1,232 | 0.94 | 0.75 to 0.97 |
+| decodeIndexBuffer u16 pirate | 0.94 | 1,374 | 1,283 | 0.94 | 0.93 to 0.95 |
+| encodeIndexSequence pirate | 0.99 | 3,293 | 3,226 | 0.99 | 0.98 to 1.03 |
+| decodeIndexSequence pirate | 0.70 | 3,190 | 2,244 | 0.70 | 0.68 to 0.77 |
+| encodeMeshlet pirate | 0.97 | 3,982 | 3,957 | 0.99 | 0.99 to 1.00 |
+| decodeMeshlet u32/u8 pirate | 0.94 | 423.2 | 430.8 | 0.98 | 0.95 to 1.02 |
+| decodeMeshlet u16/u32 pirate | 0.96 | 463.9 | 433.5 | 0.95 | 0.93 to 0.96 |
+| decodeMeshletRaw pirate | 0.97 | 452.5 | 443.1 | 0.99 | 0.98 to 1.00 |
+| encodeIndexBuffer sphere 1M | 1.03 | 13,360 | 13,601 | 1.02 | 1.02 to 1.02 |
+| decodeIndexBuffer u32 sphere 1M | 0.96 | 2,784 | 2,614 | 0.92 | 0.87 to 0.95 |
+| decodeIndexBuffer u16 sphere 1M | 0.96 | 2,582 | 2,503 | 0.97 | 0.96 to 0.99 |
+| encodeIndexSequence sphere 1M | 1.00 | 8,268 | 8,089 | 1.00 | 0.98 to 1.01 |
+| decodeIndexSequence sphere 1M | 0.69 | 6,139 | 4,354 | 0.69 | 0.68 to 0.71 |
+| encodeMeshlet sphere 1M | 1.02 | 8,539 | 8,401 | 1.02 | 0.79 to 1.02 |
+| decodeMeshlet u32/u8 sphere 1M | 0.96 | 933.6 | 895.1 | 0.96 | 0.96 to 0.98 |
+| decodeMeshlet u16/u32 sphere 1M | 0.94 | 1,005 | 973.8 | 0.96 | 0.94 to 0.98 |
+| decodeMeshletRaw sphere 1M | 0.96 | 932.8 | 912.0 | 0.98 | 0.97 to 1.00 |
+| simplify pirate | 1.04 | 1,546 | 1,609 | 1.03 | 1.03 to 1.04 |
+| simplifyWithAttributes pirate | 1.08 | 2,176 | 2,300 | 1.05 | 1.05 to 1.06 |
+| simplifyWithUpdate pirate | 1.07 | 2,294 | 2,415 | 1.05 | 1.05 to 1.06 |
+| simplifySloppy pirate | 1.07 | 121.2 | 125.3 | 1.04 | 1.03 to 1.04 |
+| simplifyPrune pirate | 0.93 | 138.8 | 138.3 | 1.00 | 0.97 to 1.00 |
+| simplifyPoints pirate | 0.92 | 74.8 | 69.3 | 0.93 | 0.85 to 0.95 |
+| simplify sphere 1M | 0.98 | 621,643 | 589,754 | 0.99 | 0.95 to 1.00 |
+| simplifyWithAttributes sphere 1M | 1.05 | 1,069,117 | 1,106,820 | 1.05 | 1.03 to 1.06 |
+| simplifyWithUpdate sphere 1M | 1.06 | 1,133,794 | 1,130,983 | 1.05 | 0.96 to 1.07 |
+| simplifySloppy sphere 1M | 0.95 | 44,127 | 42,037 | 0.95 | 0.92 to 0.96 |
+| simplifyPrune sphere 1M | 0.92 | 36,228 | 32,235 | 0.89 | 0.89 to 0.91 |
+| simplifyPoints sphere 1M | 0.95 | 28,956 | 28,866 | 0.98 | 0.89 to 1.00 |
+| simplify pirate, allocator cache | 1.04 | 1,572 | 1,693 | 1.08 | 1.03 to 1.08 |
+| clusterlod build default(128) pirate | 0.95 | 11,251 | 11,923 | 0.95 | 0.93 to 1.06 |
+| clusterlod build defaultRT(128) pirate | 1.02 | 9,235 | 9,215 | 1.01 | 1.00 to 1.01 |
+| clusterlod build default(128) sphere 262k | 0.92 | 533,127 | 478,718 | 0.91 | 0.89 to 0.91 |
+| clusterlod build defaultRT(128) sphere 262k | 1.03 | 315,740 | 325,868 | 1.03 | 1.03 to 1.05 |
+| clusterlod buildHierarchy sphere 262k | 0.92 | 2,779 | 2,540 | 0.90 | 0.90 to 0.93 |
+| encodeVertexBuffer v1 L0 pirate | 0.97 | 218.4 | 203.6 | 0.95 | 0.92 to 1.00 |
+| decodeVertexBuffer v1 L0 pirate | 1.10 | 31.0 | 31.5 | 1.01 | 0.99 to 1.04 |
+| encodeVertexBuffer v1 L1 pirate | 0.98 | 197.6 | 194.1 | 0.98 | 0.97 to 1.02 |
+| decodeVertexBuffer v1 L1 pirate | 1.14 | 28.4 | 29.3 | 1.03 | 1.01 to 1.07 |
+| encodeVertexBuffer v1 L2 pirate | 1.03 | 234.3 | 228.1 | 1.01 | 0.93 to 1.04 |
+| decodeVertexBuffer v1 L2 pirate | 1.11 | 28.5 | 29.7 | 1.03 | 1.01 to 1.04 |
+| encodeVertexBuffer v1 L3 pirate | 1.05 | 341.7 | 313.6 | 0.95 | 0.92 to 1.07 |
+| decodeVertexBuffer v1 L3 pirate | 1.10 | 21.0 | 21.6 | 1.01 | 1.00 to 1.03 |
+| encodeVertexBuffer v0 pirate | 0.98 | 114.8 | 106.9 | 0.96 | 0.93 to 1.03 |
+| decodeVertexBuffer v0 pirate | 1.10 | 22.2 | 22.7 | 1.02 | 1.01 to 1.02 |
+| encodeVertexBuffer v1 L0 pirate q16 | 0.89 | 63.0 | 56.6 | 0.90 | 0.88 to 0.93 |
+| decodeVertexBuffer v1 L0 pirate q16 | 1.06 | 11.6 | 11.6 | 1.00 | 0.99 to 1.01 |
+| encodeVertexBuffer v1 L1 pirate q16 | 0.91 | 58.3 | 54.0 | 0.93 | 0.92 to 0.96 |
+| decodeVertexBuffer v1 L1 pirate q16 | 1.07 | 11.1 | 11.2 | 1.00 | 0.99 to 1.07 |
+| encodeVertexBuffer v1 L2 pirate q16 | 0.92 | 70.4 | 69.4 | 0.99 | 0.89 to 0.99 |
+| decodeVertexBuffer v1 L2 pirate q16 | 1.07 | 11.1 | 11.2 | 1.01 | 0.99 to 1.05 |
+| encodeVertexBuffer v1 L3 pirate q16 | 0.96 | 102.2 | 96.2 | 0.93 | 0.92 to 0.95 |
+| decodeVertexBuffer v1 L3 pirate q16 | 1.05 | 11.1 | 11.2 | 1.01 | 1.00 to 1.06 |
+| encodeVertexBuffer v0 pirate q16 | 0.91 | 61.4 | 54.0 | 0.89 | 0.87 to 0.92 |
+| decodeVertexBuffer v0 pirate q16 | 1.09 | 11.4 | 11.5 | 1.01 | 0.99 to 1.03 |
+| encodeVertexBuffer v1 L0 sphere 1M | 0.94 | 36,797 | 34,410 | 0.94 | 0.93 to 0.96 |
+| decodeVertexBuffer v1 L0 sphere 1M | 1.13 | 10,946 | 10,466 | 0.96 | 0.91 to 0.98 |
+| encodeVertexBuffer v1 L1 sphere 1M | 0.98 | 33,142 | 31,791 | 0.96 | 0.86 to 0.97 |
+| decodeVertexBuffer v1 L1 sphere 1M | 1.19 | 9,291 | 8,761 | 0.93 | 0.92 to 0.94 |
+| encodeVertexBuffer v1 L2 sphere 1M | 1.01 | 40,126 | 40,992 | 1.02 | 1.02 to 1.06 |
+| decodeVertexBuffer v1 L2 sphere 1M | 1.13 | 9,305 | 8,811 | 0.94 | 0.94 to 0.95 |
+| encodeVertexBuffer v1 L3 sphere 1M | 0.98 | 75,508 | 74,169 | 0.98 | 0.95 to 1.04 |
+| decodeVertexBuffer v1 L3 sphere 1M | 1.15 | 9,192 | 8,567 | 0.95 | 0.92 to 1.02 |
+| encodeVertexBuffer v0 sphere 1M | 0.98 | 36,143 | 35,155 | 0.99 | 0.97 to 0.99 |
+| decodeVertexBuffer v0 sphere 1M | 1.15 | 9,468 | 8,957 | 0.96 | 0.95 to 0.98 |
+| encodeVertexBuffer v1 L0 sphere 1M q16 | 0.90 | 17,498 | 15,750 | 0.88 | 0.86 to 0.90 |
+| decodeVertexBuffer v1 L0 sphere 1M q16 | 1.11 | 3,813 | 3,861 | 1.02 | 1.01 to 1.03 |
+| encodeVertexBuffer v1 L1 sphere 1M q16 | 0.97 | 19,277 | 18,148 | 0.94 | 0.92 to 0.97 |
+| decodeVertexBuffer v1 L1 sphere 1M q16 | 1.10 | 3,745 | 3,758 | 1.00 | 0.99 to 1.00 |
+| encodeVertexBuffer v1 L2 sphere 1M q16 | 1.04 | 18,575 | 19,326 | 1.04 | 0.97 to 1.07 |
+| decodeVertexBuffer v1 L2 sphere 1M q16 | 1.06 | 3,864 | 3,600 | 0.93 | 0.91 to 0.98 |
+| encodeVertexBuffer v1 L3 sphere 1M q16 | 1.01 | 32,573 | 31,557 | 1.02 | 0.97 to 1.03 |
+| decodeVertexBuffer v1 L3 sphere 1M q16 | 1.04 | 3,396 | 3,158 | 0.95 | 0.93 to 0.96 |
+| encodeVertexBuffer v0 sphere 1M q16 | 0.98 | 19,620 | 18,424 | 0.95 | 0.94 to 0.95 |
+| decodeVertexBuffer v0 sphere 1M q16 | 1.07 | 3,691 | 3,873 | 1.05 | 1.02 to 1.05 |
+| encodeFilter oct 8-bit | 1.03 | 27,474 | 28,470 | 1.04 | 1.01 to 1.05 |
+| decodeFilter oct 8-bit | 0.56 | 4,586 | 2,711 | 0.59 | 0.57 to 0.62 |
+| encodeFilter oct 16-bit | 1.01 | 29,053 | 27,813 | 0.98 | 0.96 to 0.99 |
+| decodeFilter oct 16-bit | 0.41 | 6,675 | 2,907 | 0.42 | 0.40 to 0.44 |
+| encodeFilter quat | 1.61 | 19,319 | 13,574 | 0.70 | 0.68 to 0.70 |
+| decodeFilter quat | 0.52 | 6,432 | 3,410 | 0.55 | 0.52 to 0.55 |
+| encodeFilter exp separate | 0.81 | 30,521 | 26,109 | 0.81 | 0.80 to 0.86 |
+| decodeFilter exp separate | 0.70 | 2,818 | 2,053 | 0.75 | 0.72 to 0.77 |
+| encodeFilter exp shared_vector | 0.71 | 27,413 | 17,842 | 0.65 | 0.62 to 0.68 |
+| encodeFilter exp shared_component | 0.53 | 32,327 | 16,449 | 0.51 | 0.50 to 0.54 |
+| encodeFilter exp clamped | 0.76 | 29,152 | 22,215 | 0.78 | 0.68 to 0.82 |
+| encodeFilter color 8-bit | 1.06 | 28,212 | 28,755 | 1.02 | 1.02 to 1.05 |
+| decodeFilter color 8-bit | 0.58 | 3,959 | 2,259 | 0.55 | 0.55 to 0.58 |
+| encodeFilter color 16-bit | 1.14 | 28,816 | 31,834 | 1.09 | 1.07 to 1.13 |
+| decodeFilter color 16-bit | 0.42 | 6,286 | 2,621 | 0.44 | 0.39 to 0.47 |
+| remesh 64 pirate | 1.10 | 1,126 | 1,239 | 1.10 | 1.07 to 1.11 |
+| remesh 64 shell pirate | 1.05 | 1,036 | 1,106 | 1.05 | 1.05 to 1.07 |
+| remesh 64 solve pirate | 1.11 | 1,380 | 1,496 | 1.08 | 1.07 to 1.10 |
+| remesh 128 pirate | 1.09 | 4,494 | 4,851 | 1.09 | 1.08 to 1.09 |
+| remesh 128 shell pirate | 1.09 | 3,909 | 4,238 | 1.08 | 1.07 to 1.09 |
+| remesh 128 solve pirate | 1.10 | 5,228 | 5,722 | 1.09 | 1.09 to 1.10 |
+| remesh 256 pirate | 1.08 | 25,682 | 27,166 | 1.06 | 1.05 to 1.07 |
+| remesh 256 shell pirate | 1.08 | 20,779 | 21,995 | 1.06 | 1.06 to 1.07 |
+| remesh 256 solve pirate | 1.09 | 28,801 | 31,432 | 1.09 | 1.09 to 1.10 |
+| remesh 64 sphere 1M | 0.97 | 66,806 | 65,254 | 0.98 | 0.96 to 0.99 |
+| remesh 64 shell sphere 1M | 0.96 | 67,813 | 66,354 | 0.98 | 0.97 to 0.99 |
+| remesh 64 solve sphere 1M | 0.99 | 76,005 | 87,845 | 0.99 | 0.98 to 1.16 |
+| remesh 128 sphere 1M | 0.98 | 80,882 | 79,105 | 0.98 | 0.97 to 0.98 |
+| remesh 128 shell sphere 1M | 0.97 | 79,038 | 77,018 | 0.97 | 0.91 to 0.97 |
+| remesh 128 solve sphere 1M | 1.04 | 89,382 | 91,521 | 1.06 | 1.01 to 1.07 |
+| remesh 256 sphere 1M | 1.00 | 203,602 | 193,680 | 0.97 | 0.95 to 1.03 |
+| remesh 256 shell sphere 1M | 1.00 | 178,730 | 177,295 | 0.99 | 0.98 to 1.01 |
+| remesh 256 solve sphere 1M | 1.06 | 213,340 | 222,190 | 1.04 | 1.03 to 1.07 |
+| generateTangents pirate | 0.99 | 682.0 | 672.9 | 0.98 | 0.98 to 0.99 |
+| generateTangents compatible pirate | 0.98 | 682.5 | 672.7 | 0.98 | 0.97 to 0.99 |
+| generateTangents zero fallback pirate | 0.97 | 679.4 | 668.6 | 0.98 | 0.95 to 1.01 |
+| generateNormals pirate | 0.99 | 601.9 | 588.8 | 0.98 | 0.97 to 0.98 |
+| generateNormals smooth 1.5 pirate | 0.97 | 784.1 | 735.3 | 0.98 | 0.93 to 1.01 |
+| generateTangents sphere 1M | 0.96 | 188,357 | 187,155 | 0.99 | 0.91 to 1.02 |
+| generateTangents compatible sphere 1M | 1.01 | 184,013 | 181,478 | 0.99 | 0.98 to 1.00 |
+| generateTangents zero fallback sphere 1M | 0.97 | 181,253 | 181,579 | 1.01 | 1.00 to 1.01 |
+| generateNormals sphere 1M | 0.99 | 114,938 | 114,844 | 1.00 | 0.98 to 1.00 |
+| generateNormals smooth 1.5 sphere 1M | 0.96 | 208,424 | 200,182 | 0.96 | 0.96 to 0.98 |
+| opacityMapMeasure pirate | 1.00 | 177.2 | 169.5 | 0.96 | 0.96 to 1.00 |
+| opacityMapMeasure sphere 1M | 0.96 | 62,420 | 60,101 | 0.95 | 0.94 to 1.01 |
+| opacityMapRasterize 2-state pirate | 1.01 | 6,152 | 6,242 | 1.02 | 1.01 to 1.02 |
+| opacityMapRasterize 2-state level 10 | 1.00 | 80,541 | 80,129 | 1.00 | 0.99 to 1.01 |
+| opacityMapRasterize 2-state level 12 | 1.01 | 1,312,119 | 1,339,437 | 1.02 | 0.99 to 1.02 |
+| opacityMapRasterize 4-state pirate | 0.96 | 7,059 | 6,792 | 0.96 | 0.96 to 0.97 |
+| opacityMapRasterize 4-state level 10 | 0.98 | 100,007 | 94,865 | 0.96 | 0.95 to 0.97 |
+| opacityMapRasterize 4-state level 12 | 0.97 | 1,590,205 | 1,549,839 | 0.99 | 0.94 to 1.04 |
+
+## What this pass changed
+
+Each change keeps the output byte for byte; the oracle tests pass, and
+tests were added for the paths they did not reach.
+
+- **`unstripify`** (2.00 and 2.53 to 0.77 and 0.68). LLVM's SLP vectorizer
+  packed a triangle's two earlier corners into one vector register and
+  shuffled bytes for the winding swap. They are now separate integers and
+  the swap two selects; the loop without restart indices is split off, as
+  clang unswitches the original's.
+- **Vertex remap without an index buffer, and the position remap**
+  (`generateVertexRemap`, `-Multi`, `-Custom`; 0.56 to 0.80). On a large
+  mesh nearly every hash-table probe misses the caches, on both sides. Each
+  vertex's hash is now taken 16 vertices before its lookup and its bucket
+  prefetched, so the misses overlap. With an index buffer most indices name
+  a vertex already remapped, and the same lookahead cost more than it
+  saved, so that path is as before.
+- **`filterIndexBuffer`** (1.07 and 1.08 to 0.92 to 0.98). The triangle
+  table was filled one 12-byte key at a time; it is now one `memset`. For
+  tables over 1 MB, the bucket of the triangle 16 ahead is prefetched.
+- **Vertex decoding** (1.06 to 1.19 to 0.93 to 1.05). Whole blocks decode
+  straight into the destination instead of into a block buffer that is
+  then copied, which the output after an error, unspecified on both sides,
+  allows. A full block's literal and zero lanes have a known size, so they
+  are a few vector moves instead of calls into compiler_rt's `memcpy` and
+  `memset`. A destination over 1 MB is fetched for writing a block ahead,
+  since the deltas land 4 bytes at a time across its lines.
+- **`encodeFilter quat`** (1.61 to 0.70). Clang vectorizes the original's
+  loop, 8 quaternions at a time with gathers; the port now takes 8 at a
+  time on `@Vector`s, their components in a vector each.
+- **`remapVertexBuffer`** (1.52 and 1.19 to 0.99 and 0.98). Vertices of
+  sizes other than 4, 8, 12 and 16 bytes were copied with a `memcpy` call
+  each, and compiler_rt's costs more to call than glibc's; up to 64 bytes
+  they are now two overlapping moves.
+- **`analyzeVertexFetch`**: the miss count without a branch, as the
+  original's, and the visited count on vectors (1.15 and 1.06 to 1.12 and
+  1.05, within the noise).
+- **Simplifier**: the attribute error is inlined into the ranking loop, as
+  clang inlines the original's (`simplifyWithAttributes` 1.08 to 1.05 on
+  the demo mesh).
+- **Remesher**: a row's voxel numbers as a vector prefix sum. Its time on
+  the demo mesh hardly moved; see below.
+
+One cause looked for in the disassembly of each profiled hot loop was LLVM
+packing independent scalars into one vector register. It was the cause in
+`unstripify`. It also shows in the remesher's voxel sums and the
+simplifier's attribute error, where the shuffles it adds did not turn out
+to be what limits the loop.
 
 ## Slower rows
 
-Cases where the port's time is more than 1.05 of the original's:
+Cases where the port's time is more than 1.05 of the original's, in this
+run:
 
-- **`quantizeUnorm` and `quantizeSnorm` as a loop of calls (4.85 and
-  5.12).** These are inline functions in the original's header. Clang at
-  `-O3` vectorizes a C++ caller's loop of scalar calls into 16-lane
-  AVX-512 code; Zig 0.17 does not auto-vectorize a caller's loop, so the
-  same loop in Zig stays scalar. The port's function takes a vector of
-  floats as well as one float, with the same body working lane by lane, so
-  callers that want speed pass vectors: the `x16` rows call it on vectors
-  of 16 floats, against the original's loop, and take 1.00 of its time.
-- **Vertex hashing with sizes known only at run time:**
-  `generateVertexRemapMulti` (1.07 and 1.09), `filterIndexBuffer` and
-  `filterIndexBufferMulti` on the sphere (1.13 and 1.08). The port
-  compares vertices with `std.mem.eql` and copies them with
-  compiler_rt's `memcpy`, where the original calls glibc's `memcmp`
-  and `memcpy`; the shadow index buffers, which hash the same way, are
-  0.72 to 0.99, so this is likely only part of the cause.
-- **`unstripify` on the demo mesh (1.35).** A 5 µs case whose spread is
-  91% of its median: noise in timing a call that short. On the sphere it
-  is 0.82.
-- **Loops clang vectorizes** (1.06 to 1.17): `analyzeVertexFetch`,
-  `buildMeshletsSpatial` and `partitionClusters` on the sphere,
-  `simplify`, `simplifyWithAttributes` and `simplifyWithUpdate`, the
-  remesher on the demo mesh, and version 0 vertex encoding on the sphere.
-  In the original's build these functions hold 256- and 512-bit vector
-  instructions that clang's loop vectorizer made; the port's loops follow
-  the original's step by step, and those not yet written on `@Vector`s
-  stay scalar.
-- **No cause found yet** (1.06 to 1.16): `optimizeMeshlet` on the sphere,
-  `opacityMapRasterize` and `encodeIndexSequence` on the demo mesh, and
-  `decodeMeshletRaw` (whose SIMD paths both sides write by hand).
+- **`quantizeUnorm` and `quantizeSnorm` as a loop of calls (2.68 and
+  2.96).** These are inline functions in the original's header. Clang at
+  `-O3` vectorizes a C++ caller's loop of scalar calls into AVX-512 code;
+  Zig 0.17 does not auto-vectorize a caller's loop, so the same loop in Zig
+  stays scalar, and nothing in the function can change that. The port's
+  function also takes a vector of floats, with the same body working lane
+  by lane: the `x16` rows call it on vectors of 16 floats against the
+  original's loop and take 1.00 and 1.05 of its time.
+- **`generateShadowIndexBuffer` (1.31 on the demo mesh, 1.15 on the
+  sphere) and `-Multi` on the sphere (1.06).** Both sides spend most of the
+  time on one load, the hash table's, which misses the caches; the port's
+  loop is the original's, and taking hashes ahead, as the remap now does,
+  made it slower, since most indices name a vertex already seen. Part of
+  the rest is the two buffers' fill, compiler_rt's `memset` against
+  glibc's. Not resolved.
+- **The remesher on the demo mesh (1.06 to 1.10) and `remesh 128 solve` on
+  the sphere (1.06).** The gap is in voxelizing: the inner loop adds each
+  sample to its voxel's sums and quadric, and consecutive samples usually
+  hit the same voxel, so it runs at the speed of a load after a store. The
+  port's loop and the original's compile to much the same instructions;
+  hoisting the per-triangle quadric terms and laying out the voxel as the
+  original's did not change the time, and were left out. Not resolved.
+- **`buildMeshletsSpatial` on the sphere (1.07, range 1.02 to 1.12).** The
+  time is in `bvhSplit`'s box merges and split search, which follow the
+  original's SSE code; no cause found.
+- **`analyzeVertexFetch` on the demo mesh (1.12, range 0.95 to 1.13)**, a
+  25 µs case: the loop is the original's, register allocation in the port
+  keeps more on the stack. Not resolved.
+- **`remapIndexBuffer` on the demo mesh (1.12)**, a 2 µs case: clang
+  vectorizes the original's loop with gathers, and on the sphere both take
+  the same time (0.99), so the difference is in the short case's fixed
+  costs.
+- **`optimizeOverdraw` on the demo mesh (1.08), `encodeFilter color
+  16-bit` (1.09) and `simplify pirate, allocator cache` (1.08, range 1.03
+  to 1.08).** Not looked into in this pass; the first two were 1.06 and
+  1.14 before it.
